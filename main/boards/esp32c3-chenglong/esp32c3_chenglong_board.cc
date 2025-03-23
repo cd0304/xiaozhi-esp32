@@ -13,7 +13,7 @@
 #include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
+#include <cmath>  // 使用sin函数
 
 #include "iot/thing_manager.h"
 #include "led/single_led.h"
@@ -32,7 +32,6 @@ bool uart_active = false;
 // 添加自定义LED类
 class ChenglongLed : public Led {
 private:
-    std::mutex mutex_;
     led_strip_handle_t led_strip_ = nullptr;
     uint8_t r_ = 0, g_ = 0, b_ = 0;
     int blink_counter_ = 0;
@@ -41,12 +40,18 @@ private:
     bool enabled_ = true;
     gpio_num_t gpio_pin_;
 
+    esp_timer_handle_t breath_timer_ = nullptr;
+    int breath_step_ = 0;
+    int breath_max_brightness_ = 40;
+    int breath_interval_ms_ = 50;  // 呼吸效果更新间隔
+    bool breathing_ = false;
+    uint8_t breath_r_ = 0, breath_g_ = 0, breath_b_ = 40;  // 呼吸灯颜色（默认蓝色）
+
     void StartBlinkTask(int times, int interval_ms) {
         if (led_strip_ == nullptr || !enabled_) {
             return;
         }
 
-        std::lock_guard<std::mutex> lock(mutex_);
         esp_timer_stop(blink_timer_);
         
         blink_counter_ = times * 2;
@@ -55,7 +60,6 @@ private:
     }
 
     void OnBlinkTimer() {
-        std::lock_guard<std::mutex> lock(mutex_);
         if (!enabled_ || led_strip_ == nullptr) {
             return;
         }
@@ -70,6 +74,59 @@ private:
             if (blink_counter_ == 0) {
                 esp_timer_stop(blink_timer_);
             }
+        }
+    }
+    // 呼吸灯效果处理函数
+    void OnBreathTimer() {
+        if (led_strip_ == nullptr || !enabled_) {
+            return;
+        }
+        
+        // 使用正弦函数创造平滑的呼吸效果
+        // 将breath_step_映射到0-2π区间，使用正弦函数产生完整的波形
+        // sin(x)的值域是[-1,1]，我们需要将其映射到[0,1]
+        float angle = breath_step_ * 3.14159f / 100.0f;  // 0到2π的映射
+        float brightness_factor = (sin(angle) + 1.0f) / 2.0f;  // 将[-1,1]映射到[0,1]
+        
+        // 打印调试信息，查看亮度变化
+        // ESP_LOGI(TAG, "呼吸灯步进: %d, 亮度因子: %.2f", breath_step_, brightness_factor);
+        
+        // 更新LED亮度
+        uint8_t r = breath_r_ * brightness_factor;
+        uint8_t g = breath_g_ * brightness_factor;
+        uint8_t b = breath_b_ * brightness_factor;
+        
+        led_strip_set_pixel(led_strip_, 0, r, g, b);
+        led_strip_refresh(led_strip_);
+        
+        // 更新步进值
+        breath_step_++;
+        if (breath_step_ >= 200) {  // 完成一个完整的呼吸周期
+            breath_step_ = 0;
+            
+            // // 每个呼吸周期结束后暂停一段时间
+            // esp_timer_stop(breath_timer_);
+            
+            // // 使用单次定时器延迟重启呼吸效果
+            // if (breathing_) {
+            //     ESP_LOGI(TAG, "呼吸周期完成，暂停后继续");
+            //     esp_timer_handle_t delay_timer;
+            //     esp_timer_create_args_t timer_args = {
+            //         .callback = [](void *arg) {
+            //             auto self = static_cast<ChenglongLed*>(arg);
+            //             if (self->breathing_ && self->enabled_ && self->led_strip_ != nullptr) {
+            //                 ESP_LOGI(TAG, "重新启动呼吸效果");
+            //                 esp_timer_start_periodic(self->breath_timer_, self->breath_interval_ms_ * 1000);
+            //             }
+            //         },
+            //         .arg = this,
+            //         .dispatch_method = ESP_TIMER_TASK,
+            //         .name = "breath_delay",
+            //         .skip_unhandled_events = false,
+            //     };
+            //     esp_timer_create(&timer_args, &delay_timer);
+            //     esp_timer_start_once(delay_timer, 2000 * 1000);  // 2秒后重新开始呼吸
+            // }
         }
     }
 
@@ -101,7 +158,7 @@ public:
         
         led_strip_clear(led_strip_);
 
-        // 创建定时器
+        // 创建闪烁定时器
         esp_timer_create_args_t blink_timer_args = {
             .callback = [](void *arg) {
                 auto led = static_cast<ChenglongLed*>(arg);
@@ -115,7 +172,7 @@ public:
         
         err = esp_timer_create(&blink_timer_args, &blink_timer_);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "无法创建定时器: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "无法创建闪烁定时器: %s", esp_err_to_name(err));
             if (led_strip_ != nullptr) {
                 led_strip_del(led_strip_);
                 led_strip_ = nullptr;
@@ -123,14 +180,116 @@ public:
             enabled_ = false;
             return;
         }
-    }
 
+        // 创建呼吸灯定时器
+        ESP_LOGI(TAG, "在构造函数中创建呼吸定时器");
+        esp_timer_create_args_t breath_timer_args = {
+            .callback = [](void *arg) {
+                // ESP_LOGI(TAG, "呼吸定时器回调触发");
+                auto led = static_cast<ChenglongLed*>(arg);
+                led->OnBreathTimer();
+            },
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "breath_timer",
+            .skip_unhandled_events = false,
+        };
+        
+        err = esp_timer_create(&breath_timer_args, &breath_timer_);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "无法创建呼吸灯定时器: %s", esp_err_to_name(err));
+            breath_timer_ = nullptr;
+        } else {
+            ESP_LOGI(TAG, "呼吸定时器创建成功: %p", breath_timer_);
+        }
+    }
+    // 启动呼吸灯效果
+    void StartBreathing(uint8_t r = 0, uint8_t g = 0, uint8_t b = 40) {
+        if (led_strip_ == nullptr || !enabled_) {
+            ESP_LOGW(TAG, "LED不可用，无法启动呼吸效果");
+            return;
+        }
+        
+        // 停止闪烁定时器
+        if (blink_timer_ != nullptr) {
+            esp_timer_stop(blink_timer_);
+        }
+        
+        // 停止之前的呼吸定时器
+        if (breath_timer_ != nullptr) {
+            esp_timer_stop(breath_timer_);
+        } else {
+            // 如果定时器未创建，创建新定时器
+            ESP_LOGI(TAG, "创建新的呼吸定时器");
+            esp_timer_create_args_t breath_timer_args = {
+                .callback = [](void *arg) {
+                    auto led = static_cast<ChenglongLed*>(arg);
+                    led->OnBreathTimer();
+                },
+                .arg = this,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "breath_timer",
+                .skip_unhandled_events = false,
+            };
+            
+            esp_err_t err = esp_timer_create(&breath_timer_args, &breath_timer_);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "无法创建呼吸定时器: %s", esp_err_to_name(err));
+                return;
+            }
+        }
+        
+        // 设置呼吸灯颜色
+        breath_r_ = r;
+        breath_g_ = g;
+        breath_b_ = b;
+        
+        // 重置呼吸步进
+        breath_step_ = 0;
+        breathing_ = true;
+        
+        // 启动呼吸灯定时器
+        ESP_LOGI(TAG, "启动呼吸灯效果，颜色: (%d,%d,%d), 间隔: %dms", 
+                 breath_r_, breath_g_, breath_b_, breath_interval_ms_);
+        
+        // 添加测试代码，验证回调是否工作
+        ESP_LOGI(TAG, "定时器句柄: %p", breath_timer_);
+        
+        // 确保定时器正确启动
+        esp_err_t start_err = esp_timer_start_periodic(breath_timer_, breath_interval_ms_ * 1000);
+        if (start_err != ESP_OK) {
+            ESP_LOGE(TAG, "启动呼吸定时器失败: %s", esp_err_to_name(start_err));
+        } else {
+            ESP_LOGI(TAG, "呼吸定时器启动成功");
+            
+            // 添加测试回调，确认定时器工作
+            vTaskDelay(pdMS_TO_TICKS(100));
+            ESP_LOGI(TAG, "100ms后，呼吸步进应该已经更新: %d", breath_step_);
+        }
+    }
+    
+    // 停止呼吸灯效果
+    void StopBreathing() {
+        if (breath_timer_ == nullptr) {
+            return;
+        }
+        
+        breathing_ = false;
+        esp_timer_stop(breath_timer_);
+        led_strip_clear(led_strip_);
+        ESP_LOGI(TAG, "呼吸灯效果已停止");
+    }
     ~ChenglongLed() {
         if (blink_timer_ != nullptr) {
             esp_timer_stop(blink_timer_);
         }
         if (led_strip_ != nullptr) {
             led_strip_del(led_strip_);
+        }
+
+        if (breath_timer_ != nullptr) {
+            esp_timer_stop(breath_timer_);
+            esp_timer_delete(breath_timer_);
         }
     }
 
@@ -152,6 +311,8 @@ public:
                 break;
             case kDeviceStateIdle:
                 TurnOff();
+                SetColor(0, 0, 40);
+                StartBreathing();
                 break;
             case kDeviceStateConnecting:
                 SetColor(0, 0, 40);
@@ -184,9 +345,12 @@ public:
     }
 
     void TurnOn() {
-        std::lock_guard<std::mutex> lock(mutex_);
+       
         if (led_strip_ == nullptr || !enabled_) {
             return;
+        }
+        if (breathing_) {
+            StopBreathing();
         }
         led_strip_set_pixel(led_strip_, 0, r_, g_, b_);
         led_strip_refresh(led_strip_);
@@ -197,9 +361,9 @@ public:
             return;
         }
         SetColor(0, 0, 0);
-        std::lock_guard<std::mutex> lock(mutex_);
         esp_timer_stop(blink_timer_);
         led_strip_clear(led_strip_);
+
     }
 
     void BlinkOnce() {
@@ -215,15 +379,18 @@ public:
     }
 
     void Disable() {
+        ESP_LOGI(TAG, "禁用LED控制器");
+        
         if (led_strip_ == nullptr) {
             return;
         }
-
-        std::lock_guard<std::mutex> lock(mutex_);
         
-        // 停止定时器
+        // 停止所有定时器
         if (blink_timer_ != nullptr) {
             esp_timer_stop(blink_timer_);
+        }
+        if (breath_timer_ != nullptr) {
+            esp_timer_stop(breath_timer_);
         }
         
         // 清除LED显示
@@ -238,12 +405,16 @@ public:
     }
 
     void Enable() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        
         if (enabled_ && led_strip_ != nullptr) {
             ESP_LOGI(TAG, "LED已启用，无需重复启用");
             return;
         }
+        
+        // 保存当前状态
+        bool was_breathing = breathing_;
+        uint8_t saved_breath_r = breath_r_;
+        uint8_t saved_breath_g = breath_g_;
+        uint8_t saved_breath_b = breath_b_;
         
         // 确保GPIO引脚处于正确状态
         gpio_reset_pin(gpio_pin_);
@@ -268,10 +439,48 @@ public:
         
         enabled_ = true;
         ESP_LOGI(TAG, "LED控制器已成功启用");
+        
+        // 恢复之前的状态
+        if (was_breathing) {
+            ESP_LOGI(TAG, "恢复之前的呼吸效果");
+            StartBreathing(saved_breath_r, saved_breath_g, saved_breath_b);
+        } else {
+            // 恢复当前设备状态对应的LED状态
+            OnStateChanged();
+        }
     }
 
     bool IsEnabled() const {
         return enabled_ && led_strip_ != nullptr;
+    }
+
+    // 添加公共访问方法
+    bool IsBreathing() const { return breathing_; }
+    uint8_t GetBreathR() const { return breath_r_; }
+    uint8_t GetBreathG() const { return breath_g_; }
+    uint8_t GetBreathB() const { return breath_b_; }
+    
+    // 添加保存和恢复状态的方法
+    struct LedState {
+        bool was_breathing;
+        uint8_t breath_r, breath_g, breath_b;
+    };
+    
+    LedState GetState() const {
+        return {
+            .was_breathing = breathing_,
+            .breath_r = breath_r_,
+            .breath_g = breath_g_,
+            .breath_b = breath_b_
+        };
+    }
+    
+    void RestoreState(const LedState& state) {
+        if (state.was_breathing) {
+            StartBreathing(state.breath_r, state.breath_g, state.breath_b);
+        } else {
+            OnStateChanged();
+        }
     }
 };
 
@@ -380,7 +589,7 @@ private:
                  packet[6] == 0x21 && packet[7] == 0xFB) {
             
             // 发送唤醒响应 A5 FA 00 82 01 00 22 FB
-            uint8_t response[] = {0xA5, 0xFA, 0x00, 0x82, 0x01, 0x00, 0x22, 0xFB};
+            // uint8_t response[] = {0xA5, 0xFA, 0x00, 0x82, 0x01, 0x00, 0x22, 0xFB};
             // SendUartResponse(response, sizeof(response));
             ESP_LOGI(TAG, "收到唤醒词，开始对话");
             
@@ -391,6 +600,13 @@ private:
                  packet[4] == 0x01 && packet[5] == 0x00 && 
                  packet[6] == 0x0A && packet[7] == 0xFB) {
             ESP_LOGI(TAG, "收到按键请求，开始对话");
+            Application::GetInstance().WakeWordInvoke("你好");
+        }
+         // 关机请求 A5 FA 00 82 01 00 0Z FB
+        else if (length == 8 && packet[2] == 0x00 && packet[3] == 0x82 && 
+                 packet[4] == 0x01 && packet[5] == 0x00 && 
+                 packet[6] == 0x0Z && packet[7] == 0xFB) {
+            ESP_LOGI(TAG, "收到关机请求，播放关机声音");
             Application::GetInstance().WakeWordInvoke("你好");
         }
         else {
@@ -431,22 +647,32 @@ private:
     }
 
     void SendUartResponse(const uint8_t* response, size_t length) {
-        // 完全禁用LED控制器，释放GPIO
+        ESP_LOGI(TAG, "准备发送UART响应");
+        
+        // 保存LED状态 - 使用静态变量避免堆分配
+        static ChenglongLed::LedState led_state;
+        static bool has_led_state = false;
+        
         if (led_strip_) {
+            led_state = led_strip_->GetState();
+            has_led_state = true;
+            
+            // 禁用LED
             led_strip_->Disable();
+             // 等待一小段时间确保彩灯信号完全停止
+            vTaskDelay(pdMS_TO_TICKS(50));
+        } else {
+            has_led_state = false;
         }
-        // 等待一小段时间确保彩灯信号完全停止
-        vTaskDelay(pdMS_TO_TICKS(50));
         
         // 标记UART为活跃状态
         uart_active = true;
         
         // 配置UART引脚
-        ESP_ERROR_CHECK(uart_set_pin(UART_NUM_0, GPIO_NUM_21, GPIO_NUM_20, 
-                                UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+        uart_set_pin(UART_NUM_0, GPIO_NUM_21, GPIO_NUM_20, 
+                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
         vTaskDelay(pdMS_TO_TICKS(10));
         uart_flush(UART_NUM_0);
-        
         // 发送数据
         uint8_t buffer[length + 1];
         buffer[0] = length;
@@ -455,34 +681,36 @@ private:
         uart_write_bytes(UART_NUM_0, buffer, length + 1);
         uart_wait_tx_done(UART_NUM_0, pdMS_TO_TICKS(100));
         
-        // 完全释放UART资源
-        uart_wait_tx_done(UART_NUM_0, portMAX_DELAY);
-        gpio_reset_pin(GPIO_NUM_21);
-        gpio_set_direction(GPIO_NUM_21, GPIO_MODE_INPUT);
-        
         // 标记UART为非活跃状态
         uart_active = false;
         
-        // 延迟后重新启用LED
-        xTaskCreate([](void* arg) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            
-            if (!uart_active) {
-                ChenglongLed* led = static_cast<ChenglongLed*>(arg);
-                if (led) {
-                    ESP_LOGI(TAG, "尝试启用LED控制器");
-                    led->Enable();
-                    if (led->IsEnabled()) {
-                        ESP_LOGI(TAG, "LED控制器启用成功");
-                        led->TurnOn();
-                    } else {
-                        ESP_LOGW(TAG, "LED控制器启用失败");
+        // 使用静态任务函数
+        static ChenglongLed* led_to_restore = led_strip_;
+        
+        // 创建任务使用普通的C函数
+        xTaskCreate(
+            // 静态任务函数
+            [](void* arg) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                
+                if (!uart_active && led_to_restore && has_led_state) {
+                    ESP_LOGI(TAG, "重新启用LED控制器");
+                    led_to_restore->Enable();
+                    
+                    if (led_to_restore->IsEnabled()) {
+                        ESP_LOGI(TAG, "恢复LED状态");
+                        led_to_restore->RestoreState(led_state);
                     }
                 }
-            }
-            
-            vTaskDelete(NULL);
-        }, "led_enable_task", 2048, led_strip_, 5, NULL);
+                
+                vTaskDelete(NULL);
+            },
+            "led_enable_task", 
+            4096,           // 栈大小
+            NULL,           // 参数
+            1,              // 优先级
+            NULL            // 任务句柄
+        );
     }
 
     void InitializeButtons() {
