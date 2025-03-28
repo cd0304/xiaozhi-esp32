@@ -15,10 +15,14 @@
 #include "freertos/task.h"
 #include <cmath>  // 使用sin函数
 
-#include "iot/thing_manager.h"
-#include "led/single_led.h"
-#include "settings.h"
+// #include <esp_wifi.h>  // 添加这个头文件以使用 esp_wifi_set_ps 函数
 
+// #include <esp_sleep.h>  // 添加此头文件以使用 esp_deep_sleep_start 函数
+
+
+
+#include "settings.h"
+#include "assets/lang_config.h"
 #include "display/lcd_display.h"
 #include <esp_lcd_panel_vendor.h>
 #include <cstring>  
@@ -28,7 +32,8 @@ LV_FONT_DECLARE(font_awesome_20_4);
 
 // 添加一个标志来跟踪 UART 是否活跃
 bool uart_active = false;
-
+// 添加一个标志来跟踪设备是否处于睡眠状态
+// bool device_sleeping = false;
 // 添加自定义LED类
 class ChenglongLed : public Led {
 private:
@@ -46,6 +51,10 @@ private:
     int breath_interval_ms_ = 50;  // 呼吸效果更新间隔
     bool breathing_ = false;
     uint8_t breath_r_ = 0, breath_g_ = 0, breath_b_ = 40;  // 呼吸灯颜色（默认蓝色）
+
+
+    int breath_count_ = 0;  // 呼吸次数计数
+    int max_breath_count_ = 5;  // 最大呼吸次数，达到后进入睡眠
 
     void StartBlinkTask(int times, int interval_ms) {
         if (led_strip_ == nullptr || !enabled_) {
@@ -103,30 +112,54 @@ private:
         breath_step_++;
         if (breath_step_ >= 200) {  // 完成一个完整的呼吸周期
             breath_step_ = 0;
+            breath_count_++;  // 增加呼吸次数计数
             
-            // // 每个呼吸周期结束后暂停一段时间
-            // esp_timer_stop(breath_timer_);
+            ESP_LOGI(TAG, "呼吸周期完成，当前次数: %d/%d", breath_count_, max_breath_count_);
             
-            // // 使用单次定时器延迟重启呼吸效果
-            // if (breathing_) {
-            //     ESP_LOGI(TAG, "呼吸周期完成，暂停后继续");
-            //     esp_timer_handle_t delay_timer;
-            //     esp_timer_create_args_t timer_args = {
-            //         .callback = [](void *arg) {
-            //             auto self = static_cast<ChenglongLed*>(arg);
-            //             if (self->breathing_ && self->enabled_ && self->led_strip_ != nullptr) {
-            //                 ESP_LOGI(TAG, "重新启动呼吸效果");
-            //                 esp_timer_start_periodic(self->breath_timer_, self->breath_interval_ms_ * 1000);
-            //             }
-            //         },
-            //         .arg = this,
-            //         .dispatch_method = ESP_TIMER_TASK,
-            //         .name = "breath_delay",
-            //         .skip_unhandled_events = false,
-            //     };
-            //     esp_timer_create(&timer_args, &delay_timer);
-            //     esp_timer_start_once(delay_timer, 2000 * 1000);  // 2秒后重新开始呼吸
-            // }
+            // 检查是否达到最大呼吸次数
+            if (max_breath_count_ > 0 && breath_count_ >= max_breath_count_) {
+                // ESP_LOGI(TAG, "达到最大呼吸次数 %d，准备进入深度睡眠", max_breath_count_);
+                // breath_count_ = 0 ;
+                // // 停止呼吸定时器
+                // esp_timer_stop(breath_timer_);
+                
+                // // 创建一个延迟任务来执行睡眠，以便让日志完成输出
+                // esp_timer_handle_t sleep_timer;
+                // esp_timer_create_args_t timer_args = {
+                //     .callback = [](void *arg) {
+                //         ESP_LOGI(TAG, "进入轻度睡眠模式...");
+                        
+                //         // 关闭LED
+                //         auto led = static_cast<ChenglongLed*>(arg);
+                //         led->TurnOff();
+                        
+                //         // 配置唤醒源（可以通过GPIO唤醒）
+                //         // esp_sleep_enable_ext0_wakeup(GPIO_NUM_9, 0); // BOOT按钮低电平唤醒
+                        
+                //         // 进入深度睡眠
+                //         // esp_deep_sleep_start();
+
+                //         // 设置全局睡眠标志
+                //         device_sleeping = true;
+                //         esp_light_sleep_start(); // 进入轻度睡眠
+
+                //         // 唤醒后的处理
+                //         ESP_LOGI(TAG, "设备从轻度睡眠中唤醒");
+                //         device_sleeping = false;
+                //         // breath_count_ = 0 ;
+                //         // 重新启用LED
+                //         // led->Enable();
+                //         // led->OnStateChanged();
+                //     },
+                //     .arg = this,
+                //     .dispatch_method = ESP_TIMER_TASK,
+                //     .name = "sleep_timer",
+                //     .skip_unhandled_events = false,
+                // };
+                // esp_timer_create(&timer_args, &sleep_timer);
+                // esp_timer_start_once(sleep_timer, 1000 * 1000); // 1秒后进入睡眠
+            }
+           
         }
     }
 
@@ -248,6 +281,13 @@ public:
         breath_step_ = 0;
         breathing_ = true;
         
+
+        // 重置呼吸步进和计数
+        breath_step_ = 0;
+        breath_count_ = 0;
+        max_breath_count_ = max_breath_count_;
+        breathing_ = true;
+
         // 启动呼吸灯定时器
         ESP_LOGI(TAG, "启动呼吸灯效果，颜色: (%d,%d,%d), 间隔: %dms", 
                  breath_r_, breath_g_, breath_b_, breath_interval_ms_);
@@ -300,6 +340,10 @@ public:
         
         auto& app = Application::GetInstance();
         auto device_state = app.GetDeviceState();
+
+            // 使用静态变量记录启动时间
+        static uint32_t startup_time = esp_timer_get_time() / 1000000; // 秒
+    
         switch (device_state) {
             case kDeviceStateStarting:
                 SetColor(0, 0, 40);
@@ -310,10 +354,54 @@ public:
                 StartContinuousBlink(500);
                 break;
             case kDeviceStateIdle:
-                TurnOff();
+            {   // 注意这里添加了花括号创建局部作用域
+                ESP_LOGI(TAG, "设备状态为Idle，设置颜色为(0, 0, 40)");
                 SetColor(0, 0, 40);
-                StartBreathing();
+                
+                // 检查是否已经过了启动后5秒
+                uint32_t current_time = esp_timer_get_time() / 1000000; // 秒
+                if (current_time - startup_time >= 5) {
+                    // 已经过了启动后5秒，可以安全启动呼吸灯
+                    StartBreathing();
+                } else {
+                    // 尚未过启动后5秒，先关闭LED
+                    ESP_LOGI(TAG, "系统启动后 %lu 秒，暂时关闭LED并等待", current_time - startup_time);
+                    TurnOff();
+                    
+                    // 计算还需等待的时间（至少2秒，最多7秒）
+                    // 修复：使用模板参数指定类型
+                    uint32_t wait_time = std::max<uint32_t>(2000U, (7 - (current_time - startup_time)) * 1000);
+                    
+                    // 创建一次性定时器
+                    static esp_timer_handle_t delayed_breath_timer = nullptr;
+                    
+                    // 如果已存在定时器，先停止并删除
+                    if (delayed_breath_timer != nullptr) {
+                        esp_timer_stop(delayed_breath_timer);
+                        esp_timer_delete(delayed_breath_timer);
+                        delayed_breath_timer = nullptr;
+                    }
+                    
+                    // 创建新定时器
+                    esp_timer_create_args_t timer_args = {
+                        .callback = [](void *arg) {
+                            auto led = static_cast<ChenglongLed*>(arg);
+                            ESP_LOGI(TAG, "延迟后启动呼吸灯");
+                            led->StartBreathing();
+                            delayed_breath_timer = nullptr;  // 清除静态引用
+                        },
+                        .arg = this,
+                        .dispatch_method = ESP_TIMER_TASK,
+                        .name = "delayed_breath",
+                        .skip_unhandled_events = false,
+                    };
+                    esp_timer_create(&timer_args, &delayed_breath_timer);
+                    esp_timer_start_once(delayed_breath_timer, wait_time * 1000);
+
+                }
                 break;
+            }
+
             case kDeviceStateConnecting:
                 SetColor(0, 0, 40);
                 TurnOn();
@@ -513,8 +601,8 @@ private:
 
     static void UartListenTask(void* arg) {
         Esp32c3ChenglongBoard* board = static_cast<Esp32c3ChenglongBoard*>(arg);
-        uint8_t data[256]; // 增大缓冲区
-        uint8_t packet_buffer[32]; // 用于存储单个完整数据包
+        uint8_t data[64]; // 增大缓冲区
+        uint8_t packet_buffer[16]; // 用于存储单个完整数据包
         int buffer_index = 0;
         bool packet_start = false;
         
@@ -556,6 +644,25 @@ private:
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
+
+    // void wakeup_from_uart() {
+    //     // 如果设备处于睡眠状态，先唤醒设备
+
+    //         ESP_LOGI(TAG, "设备正在从睡眠状态唤醒");
+    //         // 设备会通过 UART 中断自动唤醒，这里只需重置状态
+    //         device_sleeping = false;
+            
+    //         // 重新启用LED
+    //         if (led_strip_) {
+    //             led_strip_->Enable();
+    //             led_strip_->OnStateChanged();
+    //         }
+            
+    //         // 短暂延迟，确保设备完全唤醒
+    //         vTaskDelay(pdMS_TO_TICKS(100));
+        
+        
+    // }
     // 新增方法：处理完整的数据包
     void ProcessPacket(const uint8_t* packet, int length) {
         // 检查数据包长度是否合法
@@ -580,7 +687,7 @@ private:
             
             // 发送握手响应
             uint8_t response[] = {0xA5, 0xFA, 0x00, 0x82, 0x01, 0x00, 0x21, 0xFB};
-            SendUartResponse(response, sizeof(response));
+            SendUart(response, sizeof(response));
             ESP_LOGI(TAG, "发送握手响应");
         }
         // 唤醒请求 A5 FA 00 81 01 00 21 FB
@@ -590,8 +697,13 @@ private:
             
             // 发送唤醒响应 A5 FA 00 82 01 00 22 FB
             // uint8_t response[] = {0xA5, 0xFA, 0x00, 0x82, 0x01, 0x00, 0x22, 0xFB};
-            // SendUartResponse(response, sizeof(response));
+            // SendUart(response, sizeof(response));
             ESP_LOGI(TAG, "收到唤醒词，开始对话");
+            // 如果设备处于睡眠状态，先唤醒设备
+            // if (device_sleeping) {
+            //    wakeup_from_uart();
+            // }
+        
             
             Application::GetInstance().WakeWordInvoke("你好");
         }
@@ -600,14 +712,18 @@ private:
                  packet[4] == 0x01 && packet[5] == 0x00 && 
                  packet[6] == 0x0A && packet[7] == 0xFB) {
             ESP_LOGI(TAG, "收到按键请求，开始对话");
+            // if (device_sleeping) {
+            //    wakeup_from_uart();
+            // }
             Application::GetInstance().WakeWordInvoke("你好");
         }
-         // 关机请求 A5 FA 00 82 01 00 0Z FB
+         // 关机请求 A5 FA 00 82 01 00 0F FB
         else if (length == 8 && packet[2] == 0x00 && packet[3] == 0x82 && 
                  packet[4] == 0x01 && packet[5] == 0x00 && 
-                 packet[6] == 0x0Z && packet[7] == 0xFB) {
-            ESP_LOGI(TAG, "收到关机请求，播放关机声音");
-            Application::GetInstance().WakeWordInvoke("你好");
+                 packet[6] == 0x0F && packet[7] == 0xFB) {
+            ESP_LOGI(TAG, "收到关机请求，播放关机声音，向服务器发bye");
+            Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+
         }
         else {
             // 未知数据包
@@ -635,18 +751,41 @@ private:
         ESP_ERROR_CHECK(uart_set_pin(UART_NUM_0, GPIO_NUM_21, GPIO_NUM_20, 
         UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
+        // 允许 UART 唤醒
+        // esp_sleep_enable_uart_wakeup(UART_NUM_0);
         
-        ESP_LOGI(TAG, "UART initialized successfully");
+        // 配置 UART 为唤醒源
+        // ESP_ERROR_CHECK(uart_set_wakeup_threshold(UART_NUM_0, 3)); // 接收到3个字节时唤醒
+
+        
+        // ESP_ERROR_CHECK(uart_set_rx_timeout(UART_NUM_0, 10)); // 设置接收超时
+        // ESP_ERROR_CHECK(uart_set_rx_full_threshold(UART_NUM_0, 8)); // 设置接收缓冲区阈值
+        
+        // ESP_LOGI(TAG, "UART initialized successfully with wakeup capability");
+
+        //  强制使用 XTAL 作为时钟源
+        // esp_pm_config_esp32c3_t pm_config = {
+        //     .max_freq_mhz = 80,   // 最高频率
+        //     .min_freq_mhz = 10,   // 最低频率
+        //     .light_sleep_enable = true  // 启用 Light Sleep
+        // };
+        // esp_pm_configure(&pm_config);
+        // // 关闭动态电源管理
+        // esp_pm_lock_handle_t pm_lock;
+        // esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "disable_dpm", &pm_lock);
+        // esp_pm_lock_acquire(pm_lock);  // 锁定最高频率，避免动态降频
+
+        // ESP_LOGI(TAG, "UART initialized successfully");
         // 创建串口监听任务，增加栈大小
         xTaskCreate(UartListenTask,          // 任务函数
                    "uart_task",              // 任务名称
-                   4096,                     // 任务堆栈大小，从2048增加到4096
+                   2048,                     // 任务堆栈大小，从2048增加到4096
                    this,                     // 传递给任务的参数
                    5,                        // 任务优先级
                    &uart_task_handle_);      // 任务句柄
     }
 
-    void SendUartResponse(const uint8_t* response, size_t length) {
+    void SendUart(const uint8_t* response, size_t length) {
         ESP_LOGI(TAG, "准备发送UART响应");
         
         // 保存LED状态 - 使用静态变量避免堆分配
@@ -742,7 +881,9 @@ private:
 
         auto& thing_manager = iot::ThingManager::GetInstance();
         thing_manager.AddThing(iot::CreateThing("Speaker"));
-        thing_manager.AddThing(iot::CreateThing("PressToTalk"));
+        thing_manager.AddThing(iot::CreateThing("MyThing"));
+
+
     }
 
     void InitializeSt7789Display() {
@@ -793,16 +934,23 @@ public:
 
         InitializeCodecI2c();
         InitializeButtons();
+
+        auto codec = GetAudioCodec();
+        // 添加延迟，让系统有时间初始化音频组件
+        vTaskDelay(pdMS_TO_TICKS(100));
+
         InitializeIot();
         InitializeUart();  // 添加串口初始化
 
         InitializeSpi();//tft显示屏
         InitializeSt7789Display();
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(90);
-        GetBacklight()->SetBrightness(70);
-        // gpio_set_level(DISPLAY_BACKLIGHT_PIN, 1);  // 直接输出高电平
+       
+        // codec->SetOutputVolume(90);
+        // GetBacklight()->SetBrightness(70);
+
+        // esp_wifi_set_max_tx_power(12); //当设备与路由器距离较近（<5米）时，可以降低功率节省电量。（默认 20dBm）。
+        // esp_wifi_set_ps(WIFI_PS_MIN_MODEM); //ESP32-C3 提供 Modem-sleep 模式，在 Wi-Fi 空闲时降低功耗.适用场景：Wi-Fi 并非持续高流量传输时，如在语音数据交换的间隔期间省电。
     }
 
     void InitializeSpi() {
@@ -827,11 +975,73 @@ public:
         return display_;
     }
 
+    // virtual AudioCodec* GetAudioCodec() override {
+    //     // static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+    //     //     AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
+    //     //     AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+    //     // return &audio_codec;
+
+    //     static Es8311AudioCodec* audio_codec = nullptr;
+    
+    //     if (audio_codec == nullptr) {
+    //         // 尝试初始化音频编解码器
+    //         audio_codec = new Es8311AudioCodec(codec_i2c_bus_, I2C_NUM_0, 
+    //             AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+    //             AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, 
+    //             AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
+    //             AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+                
+    //         ESP_LOGI(TAG, "音频编解码器初始化完成");
+    //     }
+        
+    //     return audio_codec;
+    // }
     virtual AudioCodec* GetAudioCodec() override {
-        static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-            AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
-        return &audio_codec;
+        static Es8311AudioCodec* audio_codec = nullptr;
+        static int init_attempts = 0;
+        const int max_attempts = 3;
+        
+        if (audio_codec == nullptr && init_attempts < max_attempts) {
+            init_attempts++;
+            ESP_LOGI(TAG, "尝试初始化音频编解码器 (尝试 %d/%d)", init_attempts, max_attempts);
+            
+            try {
+                // 添加更多内存检查
+                size_t free_heap = esp_get_free_heap_size();
+                ESP_LOGI(TAG, "当前可用堆内存: %d 字节", free_heap);
+                
+                if (free_heap < 10000) {  // 假设需要至少10KB内存
+                    ESP_LOGW(TAG, "可用内存不足，可能导致初始化失败");
+                }
+                
+                // 尝试初始化音频编解码器
+                audio_codec = new Es8311AudioCodec(codec_i2c_bus_, I2C_NUM_0, 
+                    AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+                    AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, 
+                    AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
+                    AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+                    
+                ESP_LOGI(TAG, "音频编解码器初始化完成");
+            } catch (const std::exception& e) {
+                ESP_LOGE(TAG, "音频编解码器初始化异常: %s", e.what());
+                delete audio_codec;
+                audio_codec = nullptr;
+            } catch (...) {
+                ESP_LOGE(TAG, "音频编解码器初始化发生未知异常");
+                delete audio_codec;
+                audio_codec = nullptr;
+            }
+        }
+        
+        if (audio_codec == nullptr && init_attempts >= max_attempts) {
+            ESP_LOGE(TAG, "音频编解码器初始化失败，已达到最大尝试次数");
+            
+            // 创建一个空的音频编解码器，避免空指针异常
+            // static DummyAudioCodec dummy_codec;
+            // return &dummy_codec;
+        }
+        
+        return audio_codec;
     }
 
     void SetPressToTalkEnabled(bool enabled) {
@@ -850,6 +1060,31 @@ public:
         return &backlight;
     }
 
+
+
+    //iot 指令，让小智关机
+    void TurnOffDevice() {
+        ESP_LOGI(TAG, "收到关机命令:");
+        //循环检测3秒，小智的状态是否speaking状态
+        int64_t start_time = esp_timer_get_time();
+        while (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "小智正在说话，等待其结束");
+            //让led闪烁一次
+            led_strip_->BlinkOnce();
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            if (esp_timer_get_time() - start_time > 3000000) { // 超过2秒
+                break;
+            }
+        }
+
+
+        Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+        vTaskDelay(pdMS_TO_TICKS(2000)); // 等一下叮咚的关机声音再关机
+
+        uint8_t response[] = {0xA5, 0xFA, 0x00, 0x82, 0x01, 0x00, 0xFF, 0xFB};
+        SendUart(response, sizeof(response));
+
+    }
     // 析构函数中释放资源
     ~Esp32c3ChenglongBoard() {
         if (led_strip_) {
@@ -864,9 +1099,9 @@ DECLARE_BOARD(Esp32c3ChenglongBoard);
 
 namespace iot {
 
-class PressToTalk : public Thing {
+class MyThing : public Thing {
 public:
-    PressToTalk() : Thing("PressToTalk", "控制对话模式，一种是长按对话，一种是单击后连续对话。") {
+    MyThing() : Thing("MyThing", "控制对话模式，一种是长按对话，一种是单击后连续对话,同时还能控制远程关机") {
         // 定义设备的属性
         properties_.AddBooleanProperty("enabled", "true 表示长按说话模式，false 表示单击说话模式", []() -> bool {
             auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
@@ -881,9 +1116,14 @@ public:
             auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
             board->SetPressToTalkEnabled(enabled);
         });
+
+        methods_.AddMethod("TurnOff", "关机", ParameterList(), [this](const ParameterList& parameters) {
+            auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+            board->TurnOffDevice();
+        });
     }
 };
 
 } // namespace iot
 
-DECLARE_THING(PressToTalk);
+DECLARE_THING(MyThing);
