@@ -37,6 +37,7 @@ bool uart_active = false;
 // 添加自定义LED类
 class ChenglongLed : public Led {
 private:
+    std::mutex mutex_;
     led_strip_handle_t led_strip_ = nullptr;
     uint8_t r_ = 0, g_ = 0, b_ = 0;
     int blink_counter_ = 0;
@@ -60,7 +61,7 @@ private:
         if (led_strip_ == nullptr || !enabled_) {
             return;
         }
-
+        std::lock_guard<std::mutex> lock(mutex_);
         esp_timer_stop(blink_timer_);
         
         blink_counter_ = times * 2;
@@ -69,6 +70,7 @@ private:
     }
 
     void OnBlinkTimer() {
+        std::lock_guard<std::mutex> lock(mutex_);
         if (!enabled_ || led_strip_ == nullptr) {
             return;
         }
@@ -87,6 +89,7 @@ private:
     }
     // 呼吸灯效果处理函数
     void OnBreathTimer() {
+        std::lock_guard<std::mutex> lock(mutex_);
         if (led_strip_ == nullptr || !enabled_) {
             return;
         }
@@ -114,50 +117,11 @@ private:
             breath_step_ = 0;
             breath_count_++;  // 增加呼吸次数计数
             
-            ESP_LOGI(TAG, "呼吸周期完成，当前次数: %d/%d", breath_count_, max_breath_count_);
+            // ESP_LOGI(TAG, "呼吸周期完成，当前次数: %d/%d", breath_count_, max_breath_count_);
             
             // 检查是否达到最大呼吸次数
             if (max_breath_count_ > 0 && breath_count_ >= max_breath_count_) {
-                // ESP_LOGI(TAG, "达到最大呼吸次数 %d，准备进入深度睡眠", max_breath_count_);
-                // breath_count_ = 0 ;
-                // // 停止呼吸定时器
-                // esp_timer_stop(breath_timer_);
-                
-                // // 创建一个延迟任务来执行睡眠，以便让日志完成输出
-                // esp_timer_handle_t sleep_timer;
-                // esp_timer_create_args_t timer_args = {
-                //     .callback = [](void *arg) {
-                //         ESP_LOGI(TAG, "进入轻度睡眠模式...");
-                        
-                //         // 关闭LED
-                //         auto led = static_cast<ChenglongLed*>(arg);
-                //         led->TurnOff();
-                        
-                //         // 配置唤醒源（可以通过GPIO唤醒）
-                //         // esp_sleep_enable_ext0_wakeup(GPIO_NUM_9, 0); // BOOT按钮低电平唤醒
-                        
-                //         // 进入深度睡眠
-                //         // esp_deep_sleep_start();
-
-                //         // 设置全局睡眠标志
-                //         device_sleeping = true;
-                //         esp_light_sleep_start(); // 进入轻度睡眠
-
-                //         // 唤醒后的处理
-                //         ESP_LOGI(TAG, "设备从轻度睡眠中唤醒");
-                //         device_sleeping = false;
-                //         // breath_count_ = 0 ;
-                //         // 重新启用LED
-                //         // led->Enable();
-                //         // led->OnStateChanged();
-                //     },
-                //     .arg = this,
-                //     .dispatch_method = ESP_TIMER_TASK,
-                //     .name = "sleep_timer",
-                //     .skip_unhandled_events = false,
-                // };
-                // esp_timer_create(&timer_args, &sleep_timer);
-                // esp_timer_start_once(sleep_timer, 1000 * 1000); // 1秒后进入睡眠
+                //
             }
            
         }
@@ -360,8 +324,8 @@ public:
                 
                 // 检查是否已经过了启动后5秒
                 uint32_t current_time = esp_timer_get_time() / 1000000; // 秒
-                if (current_time - startup_time >= 5) {
-                    // 已经过了启动后5秒，可以安全启动呼吸灯
+                if (current_time - startup_time >= 10) {
+                    // 已经过了启动后10秒，可以安全启动呼吸灯
                     StartBreathing();
                 } else {
                     // 尚未过启动后5秒，先关闭LED
@@ -712,18 +676,120 @@ private:
                  packet[4] == 0x01 && packet[5] == 0x00 && 
                  packet[6] == 0x0A && packet[7] == 0xFB) {
             ESP_LOGI(TAG, "收到按键请求，开始对话");
+            
             // if (device_sleeping) {
             //    wakeup_from_uart();
             // }
-            Application::GetInstance().WakeWordInvoke("你好");
+
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
+                ESP_LOGI(TAG, "wifi连接时，按键触发了重新配网");
+                ResetWifiConfiguration();
+            } else {
+                Application::GetInstance().WakeWordInvoke("你好");
+            }
+
         }
          // 关机请求 A5 FA 00 82 01 00 0F FB
         else if (length == 8 && packet[2] == 0x00 && packet[3] == 0x82 && 
                  packet[4] == 0x01 && packet[5] == 0x00 && 
                  packet[6] == 0x0F && packet[7] == 0xFB) {
-            ESP_LOGI(TAG, "收到关机请求，播放关机声音，向服务器发bye");
-            Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+            ESP_LOGI(TAG, "收到关机请求，安排播放关机声音");
+            
+            // 创建一个定时器来异步播放声音，避免在UART任务中直接调用
+            static esp_timer_handle_t shutdown_sound_timer = nullptr;
+            
+            // 如果已存在定时器，先停止并删除
+            if (shutdown_sound_timer != nullptr) {
+                esp_timer_stop(shutdown_sound_timer);
+                esp_timer_delete(shutdown_sound_timer);
+                shutdown_sound_timer = nullptr;
+            }
+            
+            // 创建新定时器，延迟10ms执行，避免在当前上下文播放
+            esp_timer_create_args_t timer_args = {
+                .callback = [](void *arg) {
+                    ESP_LOGI(TAG, "播放关机声音");
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+                    shutdown_sound_timer = nullptr;  // 清除静态引用
+                },
+                .arg = nullptr,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "shutdown_sound",
+                .skip_unhandled_events = false,
+            };
+            esp_timer_create(&timer_args, &shutdown_sound_timer);
+            esp_timer_start_once(shutdown_sound_timer, 10 * 1000); // 10ms后执行
+        } // 开机请求 A5 FA 00 82 01 00 0E FB
+        else if (length == 8 && packet[2] == 0x00 && packet[3] == 0x82 && 
+                 packet[4] == 0x01 && packet[5] == 0x00 && 
+                 packet[6] == 0x0E && packet[7] == 0xFB) {
+            ESP_LOGI(TAG, "收到开机请求，安排播放开机声音");
+            
+            // 创建一个定时器来异步播放声音，避免在UART任务中直接调用
+            static esp_timer_handle_t shutdown_sound_timer = nullptr;
+            
+            // 如果已存在定时器，先停止并删除
+            if (shutdown_sound_timer != nullptr) {
+                esp_timer_stop(shutdown_sound_timer);
+                esp_timer_delete(shutdown_sound_timer);
+                shutdown_sound_timer = nullptr;
+            }
+            
+            // 创建新定时器，延迟10ms执行，避免在当前上下文播放
+            esp_timer_create_args_t timer_args = {
+                .callback = [](void *arg) {
+                    ESP_LOGI(TAG, "播放关机声音");
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+                    shutdown_sound_timer = nullptr;  // 清除静态引用
+                },
+                .arg = nullptr,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "shutdown_sound",
+                .skip_unhandled_events = false,
+            };
+            esp_timer_create(&timer_args, &shutdown_sound_timer);
+            esp_timer_start_once(shutdown_sound_timer, 10 * 1000); // 10ms后执行
+        }
+        // 唤醒词学习成功\xA5\xFA\x00\x83\x01\x00\x22\xFB
+        else if (length == 8 && packet[2] == 0x00 && packet[3] == 0x83 && 
+                 packet[4] == 0x01 && packet[5] == 0x00 && 
+                 packet[6] == 0x22 && packet[7] == 0xFB) {
+            ESP_LOGI(TAG, "唤醒词学习成功，触发新对话");
+            // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+            Application::GetInstance().WakeWordInvoke("你好");
 
+        }
+        // 唤醒词学习失败\xA5\xFA\x00\x83\x02\x00\x23\xFB
+        else if (length == 8 && packet[2] == 0x00 && packet[3] == 0x83 && 
+                 packet[4] == 0x02 && packet[5] == 0x00 && 
+                 packet[6] == 0x23 && packet[7] == 0xFB) {
+            ESP_LOGI(TAG, "唤醒词学习失败，播放失败声音");
+            // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+
+        }
+        // 唤醒词学习说话太短\xA5\xFA\x00\x83\x03\x00\x24\xFB
+        else if (length == 8 && packet[2] == 0x00 && packet[3] == 0x83 && 
+                 packet[4] == 0x03 && packet[5] == 0x00 && 
+                 packet[6] == 0x24 && packet[7] == 0xFB) {
+            ESP_LOGI(TAG, "唤醒词学习说话太短，播放失败声音");
+            // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+
+        }
+        // "\xA5\xFA\x00\x83\x04\x00\x25\xFB"  // 学习完成
+        // 唤醒词学习完成
+        else if (length == 8 && packet[2] == 0x00 && packet[3] == 0x83 && 
+                 packet[4] == 0x04 && packet[5] == 0x00 && 
+                 packet[6] == 0x25 && packet[7] == 0xFB) {
+            ESP_LOGI(TAG, "唤醒词学习完成，触发新对话");
+            // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+            // Application::GetInstance().ToggleChatState();
+            // vTaskDelay(2000);
+            //  ESP_LOGI(TAG, "唤醒词学习完成，WakeWordInvoke");
+            // Application::GetInstance().WakeWordInvoke("你好,刚给你改了新名字，说出你的新名字吧");
+             Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
+             vTaskDelay(20);
+             Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
         }
         else {
             // 未知数据包
@@ -786,7 +852,7 @@ private:
     }
 
     void SendUart(const uint8_t* response, size_t length) {
-        ESP_LOGI(TAG, "准备发送UART响应");
+        ESP_LOGI(TAG, "准备发送UART信息");
         
         // 保存LED状态 - 使用静态变量避免堆分配
         static ChenglongLed::LedState led_state;
@@ -877,7 +943,7 @@ private:
     // 物联网初始化，添加对 AI 可见设备
     void InitializeIot() {
         Settings settings("vendor");
-        press_to_talk_enabled_ = settings.GetInt("press_to_talk", 0) != 0;
+        // press_to_talk_enabled_ = settings.GetInt("press_to_talk", 0) != 0;
 
         auto& thing_manager = iot::ThingManager::GetInstance();
         thing_manager.AddThing(iot::CreateThing("Speaker"));
@@ -933,7 +999,7 @@ public:
         esp_efuse_write_field_bit(ESP_EFUSE_VDD_SPI_AS_GPIO);
 
         InitializeCodecI2c();
-        InitializeButtons();
+        // InitializeButtons();
 
         auto codec = GetAudioCodec();
         // 添加延迟，让系统有时间初始化音频组件
@@ -946,7 +1012,7 @@ public:
         InitializeSt7789Display();
 
        
-        // codec->SetOutputVolume(90);
+        codec->SetOutputVolume(90);
         // GetBacklight()->SetBrightness(70);
 
         // esp_wifi_set_max_tx_power(12); //当设备与路由器距离较近（<5米）时，可以降低功率节省电量。（默认 20dBm）。
@@ -1044,17 +1110,17 @@ public:
         return audio_codec;
     }
 
-    void SetPressToTalkEnabled(bool enabled) {
-        press_to_talk_enabled_ = enabled;
+    // void SetPressToTalkEnabled(bool enabled) {
+    //     press_to_talk_enabled_ = enabled;
 
-        Settings settings("vendor", true);
-        settings.SetInt("press_to_talk", enabled ? 1 : 0);
-        ESP_LOGI(TAG, "Press to talk enabled: %d", enabled);
-    }
+    //     Settings settings("vendor", true);
+    //     settings.SetInt("press_to_talk", enabled ? 1 : 0);
+    //     ESP_LOGI(TAG, "Press to talk enabled: %d", enabled);
+    // }
 
-    bool IsPressToTalkEnabled() {
-        return press_to_talk_enabled_;
-    }
+    // bool IsPressToTalkEnabled() {
+    //     return press_to_talk_enabled_;
+    // }
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
@@ -1072,19 +1138,51 @@ public:
             //让led闪烁一次
             led_strip_->BlinkOnce();
             vTaskDelay(1000 / portTICK_PERIOD_MS);
-            if (esp_timer_get_time() - start_time > 3000000) { // 超过2秒
+            if (esp_timer_get_time() - start_time > 3000000) { // 超过3秒
                 break;
             }
         }
 
 
-        Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
-        vTaskDelay(pdMS_TO_TICKS(2000)); // 等一下叮咚的关机声音再关机
+        // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+        // vTaskDelay(pdMS_TO_TICKS(2000)); // 等一下叮咚的关机声音再关机
 
         uint8_t response[] = {0xA5, 0xFA, 0x00, 0x82, 0x01, 0x00, 0xFF, 0xFB};
         SendUart(response, sizeof(response));
 
     }
+    //修改唤醒词的对话提示
+    void ChangeDeviceName() {
+        ESP_LOGI(TAG, "收到小智改名字命令:");
+        //标记为正在学习唤醒词，不允许小智说话
+        Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateStarting);
+        Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+        vTaskDelay(3000 / portTICK_PERIOD_MS);
+        uint8_t response[] = {0xA5, 0xFA, 0x00, 0x84, 0x01, 0x00, 0x26, 0xFB};
+        SendUart(response, sizeof(response));
+
+        // int64_t start_time = esp_timer_get_time();
+        // auto& app = Application::GetInstance();
+        // while (app.GetDeviceState() != DeviceState::kDeviceStateListening) {
+        //     vTaskDelay(1000 / portTICK_PERIOD_MS);
+        //     if (esp_timer_get_time() - start_time > 6000000) { // 超过6秒就不等了
+        //         break;
+        //     }
+        // }
+        // ESP_LOGI(TAG, "发送学习命令");
+
+        // start_time = esp_timer_get_time();
+        
+
+
+    }
+
+    // std::string ChangeDeviceNamePrompt() {
+    //     ESP_LOGI(TAG, "小智改名字的提示内容:");
+    //     return "请你在听到咚咚声后说出你想取的新名字";
+    //     // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+    // }
+
     // 析构函数中释放资源
     ~Esp32c3ChenglongBoard() {
         if (led_strip_) {
@@ -1100,29 +1198,25 @@ DECLARE_BOARD(Esp32c3ChenglongBoard);
 namespace iot {
 
 class MyThing : public Thing {
-public:
-    MyThing() : Thing("MyThing", "控制对话模式，一种是长按对话，一种是单击后连续对话,同时还能控制远程关机") {
-        // 定义设备的属性
-        properties_.AddBooleanProperty("enabled", "true 表示长按说话模式，false 表示单击说话模式", []() -> bool {
-            auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
-            return board->IsPressToTalkEnabled();
-        });
+    private:
+         std::string custom_name_ = "小爱"; 
+    public:
+        MyThing() : Thing("MyThing", "控制设备：控制关机，更改唤醒词") {
 
-        // 定义设备可以被远程执行的指令
-        methods_.AddMethod("SetEnabled", "启用或禁用长按说话模式，调用前需要经过用户确认", ParameterList({
-            Parameter("enabled", "true 表示长按说话模式，false 表示单击说话模式", kValueTypeBoolean, true)
-        }), [](const ParameterList& parameters) {
-            bool enabled = parameters["enabled"].boolean();
-            auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
-            board->SetPressToTalkEnabled(enabled);
-        });
-
-        methods_.AddMethod("TurnOff", "关机", ParameterList(), [this](const ParameterList& parameters) {
-            auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
-            board->TurnOffDevice();
-        });
-    }
-};
+            // properties_.AddStringProperty ("custom_name", "当前名字", [this]() -> std::string {
+            //     // auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+            //     return  this->custom_name_;  
+            // });
+            // methods_.AddMethod("TurnOff", "关机", ParameterList(), [this](const ParameterList& parameters) {
+            //     auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+            //     board->TurnOffDevice();
+            // });
+            // methods_.AddMethod("changeName", "更改唤醒词，更改名字", ParameterList(), [this](const ParameterList& parameters) {
+            //     auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+            //     board->ChangeDeviceName();
+            // });
+        }
+    };
 
 } // namespace iot
 
