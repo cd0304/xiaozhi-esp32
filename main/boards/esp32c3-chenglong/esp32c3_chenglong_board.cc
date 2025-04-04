@@ -20,7 +20,7 @@
 // #include <esp_sleep.h>  // 添加此头文件以使用 esp_deep_sleep_start 函数
 
 
-
+#include "display/oled_display.h"
 #include "settings.h"
 #include "assets/lang_config.h"
 #include "display/lcd_display.h"
@@ -29,6 +29,13 @@
 #define TAG "Esp32c3ChenglongBoard"
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
+LV_FONT_DECLARE(font_puhui_14_1);
+LV_FONT_DECLARE(font_awesome_14_1);
+
+#define ADC_BATTERY_EMPTY  3300  // 设备快没电时的 电池adc电量 值
+#define ADC_BATTERY_FULL   3425  // 充满电时的 ADC 值
+#define ADC_TYPEC_FULL     3450    // 插入typec的 ADC 值（播放时，不播放会到3470）
+
 
 // 添加一个标志来跟踪 UART 是否活跃
 bool uart_active = false;
@@ -543,8 +550,16 @@ private:
     TaskHandle_t uart_task_handle_;
     bool press_to_talk_enabled_ = false;
 
-    LcdDisplay* display_;
+    // LcdDisplay* display_;
+
     ChenglongLed* led_strip_ = nullptr;
+    Display* display_ = nullptr;
+
+    esp_lcd_panel_io_handle_t panel_io_ = nullptr;
+    esp_lcd_panel_handle_t panel_ = nullptr;
+
+    //电池电量
+    uint16_t current_battery_ = 0;
     
     void InitializeCodecI2c() {
         // Initialize I2C peripheral
@@ -789,7 +804,20 @@ private:
             // Application::GetInstance().WakeWordInvoke("你好,刚给你改了新名字，说出你的新名字吧");
              Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
              vTaskDelay(20);
-             Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+             Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+        }
+        //电池电量信息 {0xA5, 0xFA, 0x05, 0x00, 0x00, 0x00, 0x00, 0xFB}; 
+        else if (length == 8 && packet[2] == 0x05 &&  packet[7] == 0xFB) {
+            ESP_LOGI(TAG, "电池电量信息");
+            //uint16_t val_received;
+            memcpy(&current_battery_, packet + 3, sizeof(uint16_t));
+           
+            current_battery_ = ((current_battery_ & 0xff) << 8) | ((current_battery_ & 0xff00) >> 8);
+            // 现在 val_received = 3300
+            printf("接收到的值: %d\n", current_battery_);
+
+            // current_battery_ = val_received;
+
         }
         else {
             // 未知数据包
@@ -953,8 +981,8 @@ private:
     }
 
     void InitializeSt7789Display() {
-        esp_lcd_panel_io_handle_t panel_io = nullptr;
-        esp_lcd_panel_handle_t panel = nullptr;
+        esp_lcd_panel_io_handle_t panel_io_tft = nullptr;
+        esp_lcd_panel_handle_t panel_tft = nullptr;
         // 液晶屏控制IO初始化
         ESP_LOGD(TAG, "Install panel IO");
         esp_lcd_panel_io_spi_config_t io_config = {};
@@ -965,7 +993,7 @@ private:
         io_config.trans_queue_depth = 10;
         io_config.lcd_cmd_bits = 8;
         io_config.lcd_param_bits = 8;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io_tft));
 
         // 初始化液晶屏驱动芯片ST7789
         ESP_LOGD(TAG, "Install LCD driver");
@@ -973,15 +1001,15 @@ private:
         panel_config.reset_gpio_num = GPIO_NUM_NC;
         panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
         panel_config.bits_per_pixel = 16;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io_tft, &panel_config, &panel_tft));
         
-        esp_lcd_panel_reset(panel);
+        esp_lcd_panel_reset(panel_tft);
 
-        esp_lcd_panel_init(panel);
-        esp_lcd_panel_invert_color(panel, true);
-        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
-        esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-        display_ = new SpiLcdDisplay(panel_io, panel,
+        esp_lcd_panel_init(panel_tft);
+        esp_lcd_panel_invert_color(panel_tft, true);
+        esp_lcd_panel_swap_xy(panel_tft, DISPLAY_SWAP_XY);
+        esp_lcd_panel_mirror(panel_tft, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        display_ = new SpiLcdDisplay(panel_io_tft, panel_tft,
                                 DISPLAY_WIDTH, DISPLAY_HEIGHT, 
                                 DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
                                 DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, 
@@ -991,6 +1019,61 @@ private:
                                     .icon_font = &font_awesome_20_4,
                                     .emoji_font = font_emoji_32_init(),
                                 });
+    }
+    void InitializeSsd1306Display() {
+        // SSD1306 config
+        esp_lcd_panel_io_i2c_config_t io_config = {
+            .dev_addr = 0x3C,
+            .on_color_trans_done = nullptr,
+            .user_ctx = nullptr,
+            .control_phase_bytes = 1,
+            .dc_bit_offset = 6,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
+            .flags = {
+                .dc_low_on_data = 0,
+                .disable_control_phase = 0,
+            },
+            .scl_speed_hz = 400 * 1000,
+        };
+
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));
+
+        ESP_LOGI(TAG, "Install SSD1306 driver");
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = -1;
+        panel_config.bits_per_pixel = 1;
+
+        esp_lcd_panel_ssd1306_config_t ssd1306_config = {
+            .height = static_cast<uint8_t>(DISPLAY_HEIGHT),
+        };
+        panel_config.vendor_config = &ssd1306_config;
+
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
+        ESP_LOGI(TAG, "SSD1306 driver installed");
+
+        // Reset the display
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
+        if (esp_lcd_panel_init(panel_) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to initialize display");
+            display_ = new NoDisplay();
+            return;
+        }
+
+        // Set the display to on
+        ESP_LOGI(TAG, "Turning display on");
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+
+        // 添加这段代码，检查可用内存
+        //  ESP_LOGI(TAG, "Available heap before display init: %d", esp_get_free_heap_size());
+    
+        display_ = new OledDisplay(panel_io_, panel_, DISPLAY_oled_WIDTH, DISPLAY_oled_HEIGHT, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
+            {&font_puhui_14_1, &font_awesome_14_1});
+
+    
+    // 检查初始化后的内存状态                          
+    // ESP_LOGI(TAG, "Available heap after display init: %d", esp_get_free_heap_size());
+
     }
 
 public:
@@ -1010,10 +1093,11 @@ public:
 
         InitializeSpi();//tft显示屏
         InitializeSt7789Display();
+        // InitializeSsd1306Display();
 
        
         codec->SetOutputVolume(90);
-        // GetBacklight()->SetBrightness(70);
+        GetBacklight()->SetBrightness(70);
 
         // esp_wifi_set_max_tx_power(12); //当设备与路由器距离较近（<5米）时，可以降低功率节省电量。（默认 20dBm）。
         // esp_wifi_set_ps(WIFI_PS_MIN_MODEM); //ESP32-C3 提供 Modem-sleep 模式，在 Wi-Fi 空闲时降低功耗.适用场景：Wi-Fi 并非持续高流量传输时，如在语音数据交换的间隔期间省电。
@@ -1156,8 +1240,8 @@ public:
         ESP_LOGI(TAG, "收到小智改名字命令:");
         //标记为正在学习唤醒词，不允许小智说话
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateStarting);
-        Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
+        Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+        // vTaskDelay(1000 / portTICK_PERIOD_MS);
         uint8_t response[] = {0xA5, 0xFA, 0x00, 0x84, 0x01, 0x00, 0x26, 0xFB};
         SendUart(response, sizeof(response));
 
@@ -1177,11 +1261,20 @@ public:
 
     }
 
-    // std::string ChangeDeviceNamePrompt() {
-    //     ESP_LOGI(TAG, "小智改名字的提示内容:");
-    //     return "请你在听到咚咚声后说出你想取的新名字";
-    //     // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
-    // }
+    std::string getCurrentBattery() {
+        ESP_LOGI(TAG, "查询电池电量:");
+        // 计算百分比
+        int battery_level = 0;
+        if (current_battery_ <= ADC_BATTERY_EMPTY) {
+            battery_level = 0;
+        } else if (current_battery_ >= ADC_BATTERY_FULL) {
+            battery_level = 100;
+        } else {
+            battery_level = (current_battery_ - ADC_BATTERY_EMPTY) * 100 / (ADC_BATTERY_FULL - ADC_BATTERY_EMPTY);
+        }
+        // int percentage = (current_battery_ * 100) / 4200;
+        return "当前电池电量:百分之" + std::to_string(battery_level);
+    }
 
     // 析构函数中释放资源
     ~Esp32c3ChenglongBoard() {
@@ -1203,18 +1296,18 @@ class MyThing : public Thing {
     public:
         MyThing() : Thing("MyThing", "控制设备：控制关机，更改唤醒词") {
 
-            // properties_.AddStringProperty ("custom_name", "当前名字", [this]() -> std::string {
-            //     // auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
-            //     return  this->custom_name_;  
-            // });
-            // methods_.AddMethod("TurnOff", "关机", ParameterList(), [this](const ParameterList& parameters) {
-            //     auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
-            //     board->TurnOffDevice();
-            // });
-            // methods_.AddMethod("changeName", "更改唤醒词，更改名字", ParameterList(), [this](const ParameterList& parameters) {
-            //     auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
-            //     board->ChangeDeviceName();
-            // });
+            properties_.AddStringProperty ("current_battery", "当前电池电量", [this]() -> std::string {
+                auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+                return  board->getCurrentBattery();  
+            });
+            methods_.AddMethod("TurnOff", "关机", ParameterList(), [this](const ParameterList& parameters) {
+                auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+                board->TurnOffDevice();
+            });
+            methods_.AddMethod("changeName", "更改唤醒词", ParameterList(), [this](const ParameterList& parameters) {
+                auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+                board->ChangeDeviceName();
+            });
         }
     };
 
