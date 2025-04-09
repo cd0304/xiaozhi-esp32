@@ -27,8 +27,8 @@
 #include <esp_lcd_panel_vendor.h>
 #include <cstring>  
 #define TAG "Esp32c3ChenglongBoard"
-LV_FONT_DECLARE(font_puhui_20_4);
-LV_FONT_DECLARE(font_awesome_20_4);
+// LV_FONT_DECLARE(font_puhui_20_4);
+// LV_FONT_DECLARE(font_awesome_20_4);
 LV_FONT_DECLARE(font_puhui_14_1);
 LV_FONT_DECLARE(font_awesome_14_1);
 
@@ -325,10 +325,13 @@ public:
                 StartContinuousBlink(500);
                 break;
             case kDeviceStateIdle:
-            {   // 注意这里添加了花括号创建局部作用域
+            {   
+                TurnOff();
+                break;
+                // 注意这里添加了花括号创建局部作用域
                 ESP_LOGI(TAG, "设备状态为Idle，设置颜色为(0, 0, 40)");
                 SetColor(0, 0, 40);
-                
+              
                 // 检查是否已经过了启动后5秒
                 uint32_t current_time = esp_timer_get_time() / 1000000; // 秒
                 if (current_time - startup_time >= 10) {
@@ -980,46 +983,46 @@ private:
 
     }
 
-    void InitializeSt7789Display() {
-        esp_lcd_panel_io_handle_t panel_io_tft = nullptr;
-        esp_lcd_panel_handle_t panel_tft = nullptr;
-        // 液晶屏控制IO初始化
-        ESP_LOGD(TAG, "Install panel IO");
-        esp_lcd_panel_io_spi_config_t io_config = {};
-        io_config.cs_gpio_num = DISPLAY_SPI_CS_PIN;
-        io_config.dc_gpio_num = DISPLAY_DC_PIN;
-        io_config.spi_mode = 2;
-        io_config.pclk_hz = 80 * 1000 * 1000;
-        io_config.trans_queue_depth = 10;
-        io_config.lcd_cmd_bits = 8;
-        io_config.lcd_param_bits = 8;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io_tft));
+    // void InitializeSt7789Display() {
+    //     esp_lcd_panel_io_handle_t panel_io_tft = nullptr;
+    //     esp_lcd_panel_handle_t panel_tft = nullptr;
+    //     // 液晶屏控制IO初始化
+    //     ESP_LOGD(TAG, "Install panel IO");
+    //     esp_lcd_panel_io_spi_config_t io_config = {};
+    //     io_config.cs_gpio_num = DISPLAY_SPI_CS_PIN;
+    //     io_config.dc_gpio_num = DISPLAY_DC_PIN;
+    //     io_config.spi_mode = 2;
+    //     io_config.pclk_hz = 80 * 1000 * 1000;
+    //     io_config.trans_queue_depth = 10;
+    //     io_config.lcd_cmd_bits = 8;
+    //     io_config.lcd_param_bits = 8;
+    //     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io_tft));
 
-        // 初始化液晶屏驱动芯片ST7789
-        ESP_LOGD(TAG, "Install LCD driver");
-        esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = GPIO_NUM_NC;
-        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
-        panel_config.bits_per_pixel = 16;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io_tft, &panel_config, &panel_tft));
+    //     // 初始化液晶屏驱动芯片ST7789
+    //     ESP_LOGD(TAG, "Install LCD driver");
+    //     esp_lcd_panel_dev_config_t panel_config = {};
+    //     panel_config.reset_gpio_num = GPIO_NUM_NC;
+    //     panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+    //     panel_config.bits_per_pixel = 16;
+    //     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io_tft, &panel_config, &panel_tft));
         
-        esp_lcd_panel_reset(panel_tft);
+    //     esp_lcd_panel_reset(panel_tft);
 
-        esp_lcd_panel_init(panel_tft);
-        esp_lcd_panel_invert_color(panel_tft, true);
-        esp_lcd_panel_swap_xy(panel_tft, DISPLAY_SWAP_XY);
-        esp_lcd_panel_mirror(panel_tft, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-        display_ = new SpiLcdDisplay(panel_io_tft, panel_tft,
-                                DISPLAY_WIDTH, DISPLAY_HEIGHT, 
-                                DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-                                DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, 
-                                DISPLAY_SWAP_XY,
-                                {
-                                    .text_font = &font_puhui_20_4,
-                                    .icon_font = &font_awesome_20_4,
-                                    .emoji_font = font_emoji_32_init(),
-                                });
-    }
+    //     esp_lcd_panel_init(panel_tft);
+    //     esp_lcd_panel_invert_color(panel_tft, true);
+    //     esp_lcd_panel_swap_xy(panel_tft, DISPLAY_SWAP_XY);
+    //     esp_lcd_panel_mirror(panel_tft, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+    //     display_ = new SpiLcdDisplay(panel_io_tft, panel_tft,
+    //                             DISPLAY_WIDTH, DISPLAY_HEIGHT, 
+    //                             DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+    //                             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, 
+    //                             DISPLAY_SWAP_XY,
+    //                             {
+    //                                 .text_font = &font_puhui_20_4,
+    //                                 .icon_font = &font_awesome_20_4,
+    //                                 .emoji_font = font_emoji_32_init(),
+    //                             });
+    // }
     void InitializeSsd1306Display() {
         // SSD1306 config
         esp_lcd_panel_io_i2c_config_t io_config = {
@@ -1045,7 +1048,7 @@ private:
         panel_config.bits_per_pixel = 1;
 
         esp_lcd_panel_ssd1306_config_t ssd1306_config = {
-            .height = static_cast<uint8_t>(DISPLAY_HEIGHT),
+            .height = static_cast<uint8_t>(DISPLAY_oled_HEIGHT),
         };
         panel_config.vendor_config = &ssd1306_config;
 
@@ -1067,7 +1070,7 @@ private:
         // 添加这段代码，检查可用内存
         //  ESP_LOGI(TAG, "Available heap before display init: %d", esp_get_free_heap_size());
     
-        display_ = new OledDisplay(panel_io_, panel_, DISPLAY_oled_WIDTH, DISPLAY_oled_HEIGHT, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
+        display_ = new OledDisplay(panel_io_, panel_, DISPLAY_oled_WIDTH, DISPLAY_oled_HEIGHT, DISPLAY_oled_MIRROR_X, DISPLAY_oled_MIRROR_Y,
             {&font_puhui_14_1, &font_awesome_14_1});
 
     
@@ -1091,9 +1094,9 @@ public:
         InitializeIot();
         InitializeUart();  // 添加串口初始化
 
-        InitializeSpi();//tft显示屏
-        InitializeSt7789Display();
-        // InitializeSsd1306Display();
+        // InitializeSpi();//tft显示屏
+        // InitializeSt7789Display();
+        InitializeSsd1306Display();
 
        
         codec->SetOutputVolume(90);
@@ -1116,6 +1119,11 @@ public:
 
     virtual Led* GetLed() override {
         ESP_LOGI(TAG, "GetLed");
+
+        //  ESP_LOGI(TAG, "GetLed");
+        //     static NoLed no_led;  // 使用静态对象避免内存泄漏
+        //     return &no_led;
+
         if (!led_strip_) {
             led_strip_ = new ChenglongLed(BUILTIN_LED_GPIO);
         }
