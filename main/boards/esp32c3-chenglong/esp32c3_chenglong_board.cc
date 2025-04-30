@@ -29,16 +29,16 @@
 #define TAG "Esp32c3ChenglongBoard"
 // LV_FONT_DECLARE(font_puhui_20_4);
 // LV_FONT_DECLARE(font_awesome_20_4);
-LV_FONT_DECLARE(font_puhui_14_1);
-LV_FONT_DECLARE(font_awesome_14_1);
+// LV_FONT_DECLARE(font_puhui_14_1);
+// LV_FONT_DECLARE(font_awesome_14_1);
 
-#define ADC_BATTERY_EMPTY  3300  // 设备快没电时的 电池adc电量 值
-#define ADC_BATTERY_FULL   3425  // 充满电时的 ADC 值
-#define ADC_TYPEC_FULL     3450    // 插入typec的 ADC 值（播放时，不播放会到3470）
+// #define ADC_BATTERY_EMPTY  3300  // 设备快没电时的 电池adc电量 值
+// #define ADC_BATTERY_FULL   3425  // 充满电时的 ADC 值
+// #define ADC_TYPEC_FULL     3450    // 插入typec的 ADC 值（播放时，不播放会到3470）
 
 
 // 添加一个标志来跟踪 UART 是否活跃
-bool uart_active = false;
+// bool uart_active = false;
 // 添加一个标志来跟踪设备是否处于睡眠状态
 // bool device_sleeping = false;
 // 添加自定义LED类
@@ -260,22 +260,22 @@ public:
         breathing_ = true;
 
         // 启动呼吸灯定时器
-        ESP_LOGI(TAG, "启动呼吸灯效果，颜色: (%d,%d,%d), 间隔: %dms", 
-                 breath_r_, breath_g_, breath_b_, breath_interval_ms_);
+        // ESP_LOGI(TAG, "启动呼吸灯效果，颜色: (%d,%d,%d), 间隔: %dms", 
+        //          breath_r_, breath_g_, breath_b_, breath_interval_ms_);
         
         // 添加测试代码，验证回调是否工作
-        ESP_LOGI(TAG, "定时器句柄: %p", breath_timer_);
+        // ESP_LOGI(TAG, "定时器句柄: %p", breath_timer_);
         
         // 确保定时器正确启动
         esp_err_t start_err = esp_timer_start_periodic(breath_timer_, breath_interval_ms_ * 1000);
         if (start_err != ESP_OK) {
             ESP_LOGE(TAG, "启动呼吸定时器失败: %s", esp_err_to_name(start_err));
         } else {
-            ESP_LOGI(TAG, "呼吸定时器启动成功");
+            // ESP_LOGI(TAG, "呼吸定时器启动成功");
             
             // 添加测试回调，确认定时器工作
-            vTaskDelay(pdMS_TO_TICKS(100));
-            ESP_LOGI(TAG, "100ms后，呼吸步进应该已经更新: %d", breath_step_);
+            // vTaskDelay(pdMS_TO_TICKS(100));
+            // ESP_LOGI(TAG, "100ms后，呼吸步进应该已经更新: %d", breath_step_);
         }
     }
     
@@ -326,53 +326,15 @@ public:
                 break;
             case kDeviceStateIdle:
             {   
-                TurnOff();
-                break;
+                // TurnOff();
+                // break;
                 // 注意这里添加了花括号创建局部作用域
                 ESP_LOGI(TAG, "设备状态为Idle，设置颜色为(0, 0, 40)");
                 SetColor(0, 0, 40);
-              
-                // 检查是否已经过了启动后5秒
-                uint32_t current_time = esp_timer_get_time() / 1000000; // 秒
-                if (current_time - startup_time >= 10) {
-                    // 已经过了启动后10秒，可以安全启动呼吸灯
-                    StartBreathing();
-                } else {
-                    // 尚未过启动后5秒，先关闭LED
-                    ESP_LOGI(TAG, "系统启动后 %lu 秒，暂时关闭LED并等待", current_time - startup_time);
-                    TurnOff();
-                    
-                    // 计算还需等待的时间（至少2秒，最多7秒）
-                    // 修复：使用模板参数指定类型
-                    uint32_t wait_time = std::max<uint32_t>(2000U, (7 - (current_time - startup_time)) * 1000);
-                    
-                    // 创建一次性定时器
-                    static esp_timer_handle_t delayed_breath_timer = nullptr;
-                    
-                    // 如果已存在定时器，先停止并删除
-                    if (delayed_breath_timer != nullptr) {
-                        esp_timer_stop(delayed_breath_timer);
-                        esp_timer_delete(delayed_breath_timer);
-                        delayed_breath_timer = nullptr;
-                    }
-                    
-                    // 创建新定时器
-                    esp_timer_create_args_t timer_args = {
-                        .callback = [](void *arg) {
-                            auto led = static_cast<ChenglongLed*>(arg);
-                            ESP_LOGI(TAG, "延迟后启动呼吸灯");
-                            led->StartBreathing();
-                            delayed_breath_timer = nullptr;  // 清除静态引用
-                        },
-                        .arg = this,
-                        .dispatch_method = ESP_TIMER_TASK,
-                        .name = "delayed_breath",
-                        .skip_unhandled_events = false,
-                    };
-                    esp_timer_create(&timer_args, &delayed_breath_timer);
-                    esp_timer_start_once(delayed_breath_timer, wait_time * 1000);
+                TurnOn();
 
-                }
+                StartBreathing();
+      
                 break;
             }
 
@@ -438,111 +400,6 @@ public:
 
     void StartContinuousBlink(int interval_ms) {
         StartBlinkTask(-1, interval_ms);
-    }
-
-    void Disable() {
-        ESP_LOGI(TAG, "禁用LED控制器");
-        
-        if (led_strip_ == nullptr) {
-            return;
-        }
-        
-        // 停止所有定时器
-        if (blink_timer_ != nullptr) {
-            esp_timer_stop(blink_timer_);
-        }
-        if (breath_timer_ != nullptr) {
-            esp_timer_stop(breath_timer_);
-        }
-        
-        // 清除LED显示
-        led_strip_clear(led_strip_);
-        
-        // 删除LED控制器，释放GPIO
-        led_strip_del(led_strip_);
-        led_strip_ = nullptr;
-        
-        enabled_ = false;
-        ESP_LOGI(TAG, "LED控制器已禁用");
-    }
-
-    void Enable() {
-        if (enabled_ && led_strip_ != nullptr) {
-            ESP_LOGI(TAG, "LED已启用，无需重复启用");
-            return;
-        }
-        
-        // 保存当前状态
-        bool was_breathing = breathing_;
-        uint8_t saved_breath_r = breath_r_;
-        uint8_t saved_breath_g = breath_g_;
-        uint8_t saved_breath_b = breath_b_;
-        
-        // 确保GPIO引脚处于正确状态
-        gpio_reset_pin(gpio_pin_);
-        gpio_set_direction(gpio_pin_, GPIO_MODE_OUTPUT);
-        vTaskDelay(pdMS_TO_TICKS(10));
-        
-        led_strip_config_t strip_config = {};
-        strip_config.strip_gpio_num = gpio_pin_;
-        strip_config.max_leds = 1;
-        strip_config.led_pixel_format = LED_PIXEL_FORMAT_GRB;
-        strip_config.led_model = LED_MODEL_WS2812;
-
-        led_strip_rmt_config_t rmt_config = {};
-        rmt_config.resolution_hz = 10 * 1000 * 1000; // 10MHz
-
-        esp_err_t err = led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip_);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "无法创建LED控制器: %s", esp_err_to_name(err));
-            led_strip_ = nullptr;
-            return;
-        }
-        
-        enabled_ = true;
-        ESP_LOGI(TAG, "LED控制器已成功启用");
-        
-        // 恢复之前的状态
-        if (was_breathing) {
-            ESP_LOGI(TAG, "恢复之前的呼吸效果");
-            StartBreathing(saved_breath_r, saved_breath_g, saved_breath_b);
-        } else {
-            // 恢复当前设备状态对应的LED状态
-            OnStateChanged();
-        }
-    }
-
-    bool IsEnabled() const {
-        return enabled_ && led_strip_ != nullptr;
-    }
-
-    // 添加公共访问方法
-    bool IsBreathing() const { return breathing_; }
-    uint8_t GetBreathR() const { return breath_r_; }
-    uint8_t GetBreathG() const { return breath_g_; }
-    uint8_t GetBreathB() const { return breath_b_; }
-    
-    // 添加保存和恢复状态的方法
-    struct LedState {
-        bool was_breathing;
-        uint8_t breath_r, breath_g, breath_b;
-    };
-    
-    LedState GetState() const {
-        return {
-            .was_breathing = breathing_,
-            .breath_r = breath_r_,
-            .breath_g = breath_g_,
-            .breath_b = breath_b_
-        };
-    }
-    
-    void RestoreState(const LedState& state) {
-        if (state.was_breathing) {
-            StartBreathing(state.breath_r, state.breath_g, state.breath_b);
-        } else {
-            OnStateChanged();
-        }
     }
 };
 
@@ -883,32 +740,32 @@ private:
     }
 
     void SendUart(const uint8_t* response, size_t length) {
-        ESP_LOGI(TAG, "准备发送UART信息");
+        // ESP_LOGI(TAG, "准备发送UART信息");
         
         // 保存LED状态 - 使用静态变量避免堆分配
-        static ChenglongLed::LedState led_state;
-        static bool has_led_state = false;
+        // static ChenglongLed::LedState led_state;
+        // static bool has_led_state = false;
         
-        if (led_strip_) {
-            led_state = led_strip_->GetState();
-            has_led_state = true;
+        // if (led_strip_) {
+        //     led_state = led_strip_->GetState();
+        //     has_led_state = true;
             
-            // 禁用LED
-            led_strip_->Disable();
-             // 等待一小段时间确保彩灯信号完全停止
-            vTaskDelay(pdMS_TO_TICKS(50));
-        } else {
-            has_led_state = false;
-        }
+        //     // 禁用LED
+        //     led_strip_->Disable();
+        //      // 等待一小段时间确保彩灯信号完全停止
+        //     vTaskDelay(pdMS_TO_TICKS(50));
+        // } else {
+        //     has_led_state = false;
+        // }
         
         // 标记UART为活跃状态
-        uart_active = true;
+        // uart_active = true;
         
-        // 配置UART引脚
-        uart_set_pin(UART_NUM_0, GPIO_NUM_21, GPIO_NUM_20, 
-                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-        vTaskDelay(pdMS_TO_TICKS(10));
-        uart_flush(UART_NUM_0);
+        // // 配置UART引脚
+        // uart_set_pin(UART_NUM_0, GPIO_NUM_21, GPIO_NUM_20, 
+        //              UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        // vTaskDelay(pdMS_TO_TICKS(10));
+        // uart_flush(UART_NUM_0);
         // 发送数据
         uint8_t buffer[length + 1];
         buffer[0] = length;
@@ -918,35 +775,35 @@ private:
         uart_wait_tx_done(UART_NUM_0, pdMS_TO_TICKS(100));
         
         // 标记UART为非活跃状态
-        uart_active = false;
+        // uart_active = false;
         
         // 使用静态任务函数
-        static ChenglongLed* led_to_restore = led_strip_;
+        // static ChenglongLed* led_to_restore = led_strip_;
         
         // 创建任务使用普通的C函数
-        xTaskCreate(
-            // 静态任务函数
-            [](void* arg) {
-                vTaskDelay(pdMS_TO_TICKS(500));
+        // xTaskCreate(
+        //     // 静态任务函数
+        //     [](void* arg) {
+        //         vTaskDelay(pdMS_TO_TICKS(500));
                 
-                if (!uart_active && led_to_restore && has_led_state) {
-                    ESP_LOGI(TAG, "重新启用LED控制器");
-                    led_to_restore->Enable();
+        //         if (!uart_active && led_to_restore && has_led_state) {
+        //             ESP_LOGI(TAG, "重新启用LED控制器");
+        //             led_to_restore->Enable();
                     
-                    if (led_to_restore->IsEnabled()) {
-                        ESP_LOGI(TAG, "恢复LED状态");
-                        led_to_restore->RestoreState(led_state);
-                    }
-                }
+        //             if (led_to_restore->IsEnabled()) {
+        //                 ESP_LOGI(TAG, "恢复LED状态");
+        //                 led_to_restore->RestoreState(led_state);
+        //             }
+        //         }
                 
-                vTaskDelete(NULL);
-            },
-            "led_enable_task", 
-            4096,           // 栈大小
-            NULL,           // 参数
-            1,              // 优先级
-            NULL            // 任务句柄
-        );
+        //         vTaskDelete(NULL);
+        //     },
+        //     "led_enable_task", 
+        //     4096,           // 栈大小
+        //     NULL,           // 参数
+        //     1,              // 优先级
+        //     NULL            // 任务句柄
+        // );
     }
 
     void InitializeButtons() {
@@ -978,7 +835,7 @@ private:
 
         auto& thing_manager = iot::ThingManager::GetInstance();
         thing_manager.AddThing(iot::CreateThing("Speaker"));
-        thing_manager.AddThing(iot::CreateThing("MyThing"));
+        // thing_manager.AddThing(iot::CreateThing("MyThing"));
 
 
     }
@@ -1023,62 +880,116 @@ private:
     //                                 .emoji_font = font_emoji_32_init(),
     //                             });
     // }
-    void InitializeSsd1306Display() {
-        // SSD1306 config
-        esp_lcd_panel_io_i2c_config_t io_config = {
-            .dev_addr = 0x3C,
-            .on_color_trans_done = nullptr,
-            .user_ctx = nullptr,
-            .control_phase_bytes = 1,
-            .dc_bit_offset = 6,
-            .lcd_cmd_bits = 8,
-            .lcd_param_bits = 8,
-            .flags = {
-                .dc_low_on_data = 0,
-                .disable_control_phase = 0,
-            },
-            .scl_speed_hz = 400 * 1000,
-        };
+    // void InitializeSsd1306Display() {
+    //     // SSD1306 config
+    //     esp_lcd_panel_io_i2c_config_t io_config = {
+    //         .dev_addr = 0x3C,
+    //         .on_color_trans_done = nullptr,
+    //         .user_ctx = nullptr,
+    //         .control_phase_bytes = 1,
+    //         .dc_bit_offset = 6,
+    //         .lcd_cmd_bits = 8,
+    //         .lcd_param_bits = 8,
+    //         .flags = {
+    //             .dc_low_on_data = 0,
+    //             .disable_control_phase = 0,
+    //         },
+    //         .scl_speed_hz = 400 * 1000,
+    //     };
 
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));
+    //     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));
 
-        ESP_LOGI(TAG, "Install SSD1306 driver");
-        esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = -1;
-        panel_config.bits_per_pixel = 1;
+    //     ESP_LOGI(TAG, "Install SSD1306 driver");
+    //     esp_lcd_panel_dev_config_t panel_config = {};
+    //     panel_config.reset_gpio_num = -1;
+    //     panel_config.bits_per_pixel = 1;
 
-        esp_lcd_panel_ssd1306_config_t ssd1306_config = {
-            .height = static_cast<uint8_t>(DISPLAY_oled_HEIGHT),
-        };
-        panel_config.vendor_config = &ssd1306_config;
+    //     esp_lcd_panel_ssd1306_config_t ssd1306_config = {
+    //         .height = static_cast<uint8_t>(DISPLAY_oled_HEIGHT),
+    //     };
+    //     panel_config.vendor_config = &ssd1306_config;
 
-        ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
-        ESP_LOGI(TAG, "SSD1306 driver installed");
+    //     ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
+    //     ESP_LOGI(TAG, "SSD1306 driver installed");
 
-        // Reset the display
-        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
-        if (esp_lcd_panel_init(panel_) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to initialize display");
-            display_ = new NoDisplay();
-            return;
-        }
+    //     // Reset the display
+    //     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
+    //     if (esp_lcd_panel_init(panel_) != ESP_OK) {
+    //         ESP_LOGE(TAG, "Failed to initialize display");
+    //         display_ = new NoDisplay();
+    //         return;
+    //     }
 
-        // Set the display to on
-        ESP_LOGI(TAG, "Turning display on");
-        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+    //     // Set the display to on
+    //     ESP_LOGI(TAG, "Turning display on");
+    //     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
 
-        // 添加这段代码，检查可用内存
-        //  ESP_LOGI(TAG, "Available heap before display init: %d", esp_get_free_heap_size());
+    //     // 添加这段代码，检查可用内存
+    //     //  ESP_LOGI(TAG, "Available heap before display init: %d", esp_get_free_heap_size());
     
-        display_ = new OledDisplay(panel_io_, panel_, DISPLAY_oled_WIDTH, DISPLAY_oled_HEIGHT, DISPLAY_oled_MIRROR_X, DISPLAY_oled_MIRROR_Y,
-            {&font_puhui_14_1, &font_awesome_14_1});
+    //     display_ = new OledDisplay(panel_io_, panel_, DISPLAY_oled_WIDTH, DISPLAY_oled_HEIGHT, DISPLAY_oled_MIRROR_X, DISPLAY_oled_MIRROR_Y,
+    //         {&font_puhui_14_1, &font_awesome_14_1});
 
     
-    // 检查初始化后的内存状态                          
-    // ESP_LOGI(TAG, "Available heap after display init: %d", esp_get_free_heap_size());
+    // // 检查初始化后的内存状态                          
+    // // ESP_LOGI(TAG, "Available heap after display init: %d", esp_get_free_heap_size());
 
-    }
+    // }
+// void InitializeSsdSh1107Display() {
+//         // SSD1306 config
+//         esp_lcd_panel_io_i2c_config_t io_config = {
+//             .dev_addr = 0x3C,
+//             .on_color_trans_done = nullptr,
+//             .user_ctx = nullptr,
+//             .control_phase_bytes = 1,
+//             .dc_bit_offset = 6,
+//             .lcd_cmd_bits = 8,
+//             .lcd_param_bits = 8,
+//             .flags = {
+//                 .dc_low_on_data = 0,
+//                 .disable_control_phase = 0,
+//             },
+//             .scl_speed_hz = 400 * 1000,
+//         };
 
+//         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));
+
+//         ESP_LOGI(TAG, "Install SSD1306 driver");
+//         esp_lcd_panel_dev_config_t panel_config = {};
+//         panel_config.reset_gpio_num = -1;
+//         panel_config.bits_per_pixel = 1;
+
+//         esp_lcd_panel_ssd1306_config_t ssd1306_config = {
+//             .height = static_cast<uint8_t>(DISPLAY_oled_HEIGHT),
+//         };
+//         panel_config.vendor_config = &ssd1306_config;
+
+//         ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
+//         ESP_LOGI(TAG, "SSD1306 driver installed");
+
+//         // Reset the display
+//         ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
+//         if (esp_lcd_panel_init(panel_) != ESP_OK) {
+//             ESP_LOGE(TAG, "Failed to initialize display");
+//             display_ = new NoDisplay();
+//             return;
+//         }
+
+//         // Set the display to on
+//         ESP_LOGI(TAG, "Turning display on");
+//         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+
+//         // 添加这段代码，检查可用内存
+//         //  ESP_LOGI(TAG, "Available heap before display init: %d", esp_get_free_heap_size());
+    
+//         display_ = new OledDisplay(panel_io_, panel_, DISPLAY_oled_WIDTH, DISPLAY_oled_HEIGHT, DISPLAY_oled_MIRROR_X, DISPLAY_oled_MIRROR_Y,
+//             {&font_puhui_14_1, &font_awesome_14_1});
+
+    
+//     // 检查初始化后的内存状态                          
+//     // ESP_LOGI(TAG, "Available heap after display init: %d", esp_get_free_heap_size());
+
+//     }
 public:
     Esp32c3ChenglongBoard() : boot_button_(BOOT_BUTTON_GPIO) {  
         // 把 ESP32C3 的 VDD SPI 引脚作为普通 GPIO 口使用
@@ -1096,26 +1007,26 @@ public:
 
         // InitializeSpi();//tft显示屏
         // InitializeSt7789Display();
-        InitializeSsd1306Display();
+        // InitializeSsd1306Display();
 
        
         codec->SetOutputVolume(90);
-        GetBacklight()->SetBrightness(70);
+        // GetBacklight()->SetBrightness(100);
 
         // esp_wifi_set_max_tx_power(12); //当设备与路由器距离较近（<5米）时，可以降低功率节省电量。（默认 20dBm）。
         // esp_wifi_set_ps(WIFI_PS_MIN_MODEM); //ESP32-C3 提供 Modem-sleep 模式，在 Wi-Fi 空闲时降低功耗.适用场景：Wi-Fi 并非持续高流量传输时，如在语音数据交换的间隔期间省电。
     }
 
-    void InitializeSpi() {
-        spi_bus_config_t buscfg = {};
-        buscfg.mosi_io_num = DISPLAY_SPI_MOSI_PIN;
-        buscfg.miso_io_num = GPIO_NUM_NC;
-        buscfg.sclk_io_num = DISPLAY_SPI_SCK_PIN;
-        buscfg.quadwp_io_num = GPIO_NUM_NC;
-        buscfg.quadhd_io_num = GPIO_NUM_NC;
-        buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
-        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
-    }
+    // void InitializeSpi() {
+    //     spi_bus_config_t buscfg = {};
+    //     buscfg.mosi_io_num = DISPLAY_SPI_MOSI_PIN;
+    //     buscfg.miso_io_num = GPIO_NUM_NC;
+    //     buscfg.sclk_io_num = DISPLAY_SPI_SCK_PIN;
+    //     buscfg.quadwp_io_num = GPIO_NUM_NC;
+    //     buscfg.quadhd_io_num = GPIO_NUM_NC;
+    //     buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
+    //     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    // }
 
     virtual Led* GetLed() override {
         ESP_LOGI(TAG, "GetLed");
@@ -1129,9 +1040,9 @@ public:
         }
         return led_strip_;
     }
-    virtual Display* GetDisplay() override {
-        return display_;
-    }
+    // virtual Display* GetDisplay() override {
+    //     return display_;
+    // }
 
     // virtual AudioCodec* GetAudioCodec() override {
     //     // static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
@@ -1213,76 +1124,76 @@ public:
     // bool IsPressToTalkEnabled() {
     //     return press_to_talk_enabled_;
     // }
-    virtual Backlight* GetBacklight() override {
-        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-        return &backlight;
-    }
+    // virtual Backlight* GetBacklight() override {
+    //     static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+    //     return &backlight;
+    // }
 
 
 
     //iot 指令，让小智关机
-    void TurnOffDevice() {
-        ESP_LOGI(TAG, "收到关机命令:");
-        //循环检测3秒，小智的状态是否speaking状态
-        int64_t start_time = esp_timer_get_time();
-        while (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateSpeaking) {
-            ESP_LOGI(TAG, "小智正在说话，等待其结束");
-            //让led闪烁一次
-            led_strip_->BlinkOnce();
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-            if (esp_timer_get_time() - start_time > 3000000) { // 超过3秒
-                break;
-            }
-        }
+    // void TurnOffDevice() {
+    //     ESP_LOGI(TAG, "收到关机命令:");
+    //     //循环检测3秒，小智的状态是否speaking状态
+    //     int64_t start_time = esp_timer_get_time();
+    //     while (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateSpeaking) {
+    //         ESP_LOGI(TAG, "小智正在说话，等待其结束");
+    //         //让led闪烁一次
+    //         led_strip_->BlinkOnce();
+    //         vTaskDelay(1000 / portTICK_PERIOD_MS);
+    //         if (esp_timer_get_time() - start_time > 3000000) { // 超过3秒
+    //             break;
+    //         }
+    //     }
 
 
-        // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
-        // vTaskDelay(pdMS_TO_TICKS(2000)); // 等一下叮咚的关机声音再关机
+    //     // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
+    //     // vTaskDelay(pdMS_TO_TICKS(2000)); // 等一下叮咚的关机声音再关机
 
-        uint8_t response[] = {0xA5, 0xFA, 0x00, 0x82, 0x01, 0x00, 0xFF, 0xFB};
-        SendUart(response, sizeof(response));
+    //     uint8_t response[] = {0xA5, 0xFA, 0x00, 0x82, 0x01, 0x00, 0xFF, 0xFB};
+    //     SendUart(response, sizeof(response));
 
-    }
+    // }
     //修改唤醒词的对话提示
-    void ChangeDeviceName() {
-        ESP_LOGI(TAG, "收到小智改名字命令:");
-        //标记为正在学习唤醒词，不允许小智说话
-        Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateStarting);
-        Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
-        // vTaskDelay(1000 / portTICK_PERIOD_MS);
-        uint8_t response[] = {0xA5, 0xFA, 0x00, 0x84, 0x01, 0x00, 0x26, 0xFB};
-        SendUart(response, sizeof(response));
+    // void ChangeDeviceName() {
+    //     ESP_LOGI(TAG, "收到小智改名字命令:");
+    //     //标记为正在学习唤醒词，不允许小智说话
+    //     Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateStarting);
+    //     Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+    //     // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    //     uint8_t response[] = {0xA5, 0xFA, 0x00, 0x84, 0x01, 0x00, 0x26, 0xFB};
+    //     SendUart(response, sizeof(response));
 
-        // int64_t start_time = esp_timer_get_time();
-        // auto& app = Application::GetInstance();
-        // while (app.GetDeviceState() != DeviceState::kDeviceStateListening) {
-        //     vTaskDelay(1000 / portTICK_PERIOD_MS);
-        //     if (esp_timer_get_time() - start_time > 6000000) { // 超过6秒就不等了
-        //         break;
-        //     }
-        // }
-        // ESP_LOGI(TAG, "发送学习命令");
+    //     // int64_t start_time = esp_timer_get_time();
+    //     // auto& app = Application::GetInstance();
+    //     // while (app.GetDeviceState() != DeviceState::kDeviceStateListening) {
+    //     //     vTaskDelay(1000 / portTICK_PERIOD_MS);
+    //     //     if (esp_timer_get_time() - start_time > 6000000) { // 超过6秒就不等了
+    //     //         break;
+    //     //     }
+    //     // }
+    //     // ESP_LOGI(TAG, "发送学习命令");
 
-        // start_time = esp_timer_get_time();
+    //     // start_time = esp_timer_get_time();
         
 
 
-    }
+    // }
 
-    std::string getCurrentBattery() {
-        ESP_LOGI(TAG, "查询电池电量:");
-        // 计算百分比
-        int battery_level = 0;
-        if (current_battery_ <= ADC_BATTERY_EMPTY) {
-            battery_level = 0;
-        } else if (current_battery_ >= ADC_BATTERY_FULL) {
-            battery_level = 100;
-        } else {
-            battery_level = (current_battery_ - ADC_BATTERY_EMPTY) * 100 / (ADC_BATTERY_FULL - ADC_BATTERY_EMPTY);
-        }
-        // int percentage = (current_battery_ * 100) / 4200;
-        return "当前电池电量:百分之" + std::to_string(battery_level);
-    }
+    // std::string getCurrentBattery() {
+    //     ESP_LOGI(TAG, "查询电池电量:");
+    //     // 计算百分比
+    //     int battery_level = 0;
+    //     if (current_battery_ <= ADC_BATTERY_EMPTY) {
+    //         battery_level = 0;
+    //     } else if (current_battery_ >= ADC_BATTERY_FULL) {
+    //         battery_level = 100;
+    //     } else {
+    //         battery_level = (current_battery_ - ADC_BATTERY_EMPTY) * 100 / (ADC_BATTERY_FULL - ADC_BATTERY_EMPTY);
+    //     }
+    //     // int percentage = (current_battery_ * 100) / 4200;
+    //     return "当前电池电量:百分之" + std::to_string(battery_level);
+    // }
 
     // 析构函数中释放资源
     ~Esp32c3ChenglongBoard() {
@@ -1296,29 +1207,29 @@ DECLARE_BOARD(Esp32c3ChenglongBoard);
 
 
 
-namespace iot {
+// namespace iot {
 
-class MyThing : public Thing {
-    private:
-         std::string custom_name_ = "小爱"; 
-    public:
-        MyThing() : Thing("MyThing", "控制设备：控制关机，更改唤醒词") {
+// class MyThing : public Thing {
+//     private:
+//          std::string custom_name_ = "小爱"; 
+//     public:
+//         MyThing() : Thing("MyThing", "控制设备：控制关机，更改唤醒词") {
 
-            properties_.AddStringProperty ("current_battery", "当前电池电量", [this]() -> std::string {
-                auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
-                return  board->getCurrentBattery();  
-            });
-            methods_.AddMethod("TurnOff", "关机", ParameterList(), [this](const ParameterList& parameters) {
-                auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
-                board->TurnOffDevice();
-            });
-            methods_.AddMethod("changeName", "更改唤醒词", ParameterList(), [this](const ParameterList& parameters) {
-                auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
-                board->ChangeDeviceName();
-            });
-        }
-    };
+//             properties_.AddStringProperty ("current_battery", "当前电池电量", [this]() -> std::string {
+//                 auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+//                 return  board->getCurrentBattery();  
+//             });
+//             methods_.AddMethod("TurnOff", "关机", ParameterList(), [this](const ParameterList& parameters) {
+//                 auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+//                 board->TurnOffDevice();
+//             });
+//             methods_.AddMethod("changeName", "更改唤醒词", ParameterList(), [this](const ParameterList& parameters) {
+//                 auto board = static_cast<Esp32c3ChenglongBoard*>(&Board::GetInstance());
+//                 board->ChangeDeviceName();
+//             });
+//         }
+//     };
 
-} // namespace iot
+// } // namespace iot
 
-DECLARE_THING(MyThing);
+// DECLARE_THING(MyThing);

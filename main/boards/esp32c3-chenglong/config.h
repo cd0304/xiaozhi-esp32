@@ -19,7 +19,7 @@
 
 // #define BUILTIN_LED_GPIO        GPIO_NUM_2
 #define BOOT_BUTTON_GPIO        GPIO_NUM_9
-#define BUILTIN_LED_GPIO        GPIO_NUM_21
+#define BUILTIN_LED_GPIO        GPIO_NUM_9
 #define UART_TX_PIN GPIO_NUM_21
 #define UART_RX_PIN GPIO_NUM_20
 
@@ -32,7 +32,7 @@
 #define DISPLAY_BACKLIGHT_PIN   GPIO_NUM_2
 #define DISPLAY_RESET_PIN       -1
 #define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
+#define DISPLAY_HEIGHT  240
 #define DISPLAY_MIRROR_X true
 #define DISPLAY_MIRROR_Y true
 #define DISPLAY_SWAP_XY false
@@ -41,7 +41,7 @@
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
 #define DISPLAY_oled_WIDTH   128
-#define DISPLAY_oled_HEIGHT  32
+#define DISPLAY_oled_HEIGHT  64
 #define DISPLAY_oled_MIRROR_X false
 #define DISPLAY_oled_MIRROR_Y false
 #define DISPLAY_oled_SWAP_XY false
