@@ -27,8 +27,8 @@
 #include <esp_lcd_panel_vendor.h>
 #include <cstring>  
 #define TAG "Esp32c3ChenglongBoard"
-// LV_FONT_DECLARE(font_puhui_20_4);
-// LV_FONT_DECLARE(font_awesome_20_4);
+LV_FONT_DECLARE(font_puhui_20_4);
+LV_FONT_DECLARE(font_awesome_20_4);
 // LV_FONT_DECLARE(font_puhui_14_1);
 // LV_FONT_DECLARE(font_awesome_14_1);
 
@@ -484,24 +484,7 @@ private:
         }
     }
 
-    // void wakeup_from_uart() {
-    //     // 如果设备处于睡眠状态，先唤醒设备
-
-    //         ESP_LOGI(TAG, "设备正在从睡眠状态唤醒");
-    //         // 设备会通过 UART 中断自动唤醒，这里只需重置状态
-    //         device_sleeping = false;
-            
-    //         // 重新启用LED
-    //         if (led_strip_) {
-    //             led_strip_->Enable();
-    //             led_strip_->OnStateChanged();
-    //         }
-            
-    //         // 短暂延迟，确保设备完全唤醒
-    //         vTaskDelay(pdMS_TO_TICKS(100));
-        
-        
-    // }
+    
     // 新增方法：处理完整的数据包
     void ProcessPacket(const uint8_t* packet, int length) {
         // 检查数据包长度是否合法
@@ -705,31 +688,7 @@ private:
         ESP_ERROR_CHECK(uart_set_pin(UART_NUM_0, GPIO_NUM_21, GPIO_NUM_20, 
         UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
-        // 允许 UART 唤醒
-        // esp_sleep_enable_uart_wakeup(UART_NUM_0);
-        
-        // 配置 UART 为唤醒源
-        // ESP_ERROR_CHECK(uart_set_wakeup_threshold(UART_NUM_0, 3)); // 接收到3个字节时唤醒
-
-        
-        // ESP_ERROR_CHECK(uart_set_rx_timeout(UART_NUM_0, 10)); // 设置接收超时
-        // ESP_ERROR_CHECK(uart_set_rx_full_threshold(UART_NUM_0, 8)); // 设置接收缓冲区阈值
-        
-        // ESP_LOGI(TAG, "UART initialized successfully with wakeup capability");
-
-        //  强制使用 XTAL 作为时钟源
-        // esp_pm_config_esp32c3_t pm_config = {
-        //     .max_freq_mhz = 80,   // 最高频率
-        //     .min_freq_mhz = 10,   // 最低频率
-        //     .light_sleep_enable = true  // 启用 Light Sleep
-        // };
-        // esp_pm_configure(&pm_config);
-        // // 关闭动态电源管理
-        // esp_pm_lock_handle_t pm_lock;
-        // esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "disable_dpm", &pm_lock);
-        // esp_pm_lock_acquire(pm_lock);  // 锁定最高频率，避免动态降频
-
-        // ESP_LOGI(TAG, "UART initialized successfully");
+       
         // 创建串口监听任务，增加栈大小
         xTaskCreate(UartListenTask,          // 任务函数
                    "uart_task",              // 任务名称
@@ -840,156 +799,46 @@ private:
 
     }
 
-    // void InitializeSt7789Display() {
-    //     esp_lcd_panel_io_handle_t panel_io_tft = nullptr;
-    //     esp_lcd_panel_handle_t panel_tft = nullptr;
-    //     // 液晶屏控制IO初始化
-    //     ESP_LOGD(TAG, "Install panel IO");
-    //     esp_lcd_panel_io_spi_config_t io_config = {};
-    //     io_config.cs_gpio_num = DISPLAY_SPI_CS_PIN;
-    //     io_config.dc_gpio_num = DISPLAY_DC_PIN;
-    //     io_config.spi_mode = 2;
-    //     io_config.pclk_hz = 80 * 1000 * 1000;
-    //     io_config.trans_queue_depth = 10;
-    //     io_config.lcd_cmd_bits = 8;
-    //     io_config.lcd_param_bits = 8;
-    //     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io_tft));
+    void InitializeSt7789Display() {
+        ESP_LOGD(TAG, "Install panel IO");
+        esp_lcd_panel_io_spi_config_t io_config = {};
+        io_config.cs_gpio_num = DISPLAY_SPI_CS_PIN;
+        io_config.dc_gpio_num = DISPLAY_DC_PIN;
+        io_config.spi_mode = 3;
+        io_config.pclk_hz = 40 * 1000 * 1000;
+        io_config.trans_queue_depth = 10;
+        io_config.lcd_cmd_bits = 8;
+        io_config.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io_));
 
-    //     // 初始化液晶屏驱动芯片ST7789
-    //     ESP_LOGD(TAG, "Install LCD driver");
-    //     esp_lcd_panel_dev_config_t panel_config = {};
-    //     panel_config.reset_gpio_num = GPIO_NUM_NC;
-    //     panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
-    //     panel_config.bits_per_pixel = 16;
-    //     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io_tft, &panel_config, &panel_tft));
-        
-    //     esp_lcd_panel_reset(panel_tft);
+        ESP_LOGD(TAG, "Install LCD driver");
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = GPIO_NUM_NC;
+        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+        panel_config.bits_per_pixel = 16;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io_, &panel_config, &panel_));
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
+        ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
+        ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_, DISPLAY_SWAP_XY));
+        ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
+        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, true));
 
-    //     esp_lcd_panel_init(panel_tft);
-    //     esp_lcd_panel_invert_color(panel_tft, true);
-    //     esp_lcd_panel_swap_xy(panel_tft, DISPLAY_SWAP_XY);
-    //     esp_lcd_panel_mirror(panel_tft, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-    //     display_ = new SpiLcdDisplay(panel_io_tft, panel_tft,
-    //                             DISPLAY_WIDTH, DISPLAY_HEIGHT, 
-    //                             DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-    //                             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, 
-    //                             DISPLAY_SWAP_XY,
-    //                             {
-    //                                 .text_font = &font_puhui_20_4,
-    //                                 .icon_font = &font_awesome_20_4,
-    //                                 .emoji_font = font_emoji_32_init(),
-    //                             });
-    // }
-    // void InitializeSsd1306Display() {
-    //     // SSD1306 config
-    //     esp_lcd_panel_io_i2c_config_t io_config = {
-    //         .dev_addr = 0x3C,
-    //         .on_color_trans_done = nullptr,
-    //         .user_ctx = nullptr,
-    //         .control_phase_bytes = 1,
-    //         .dc_bit_offset = 6,
-    //         .lcd_cmd_bits = 8,
-    //         .lcd_param_bits = 8,
-    //         .flags = {
-    //             .dc_low_on_data = 0,
-    //             .disable_control_phase = 0,
-    //         },
-    //         .scl_speed_hz = 400 * 1000,
-    //     };
+        display_ = new SpiLcdDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, 
+        {
+            .text_font = &font_puhui_20_4,
+            .icon_font = &font_awesome_20_4,
+#if CONFIG_USE_WECHAT_MESSAGE_STYLE
+            .emoji_font = font_emoji_32_init(),
+#else
+            .emoji_font = font_emoji_64_init(),
+#endif
+        });
+    }
 
-    //     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));
 
-    //     ESP_LOGI(TAG, "Install SSD1306 driver");
-    //     esp_lcd_panel_dev_config_t panel_config = {};
-    //     panel_config.reset_gpio_num = -1;
-    //     panel_config.bits_per_pixel = 1;
 
-    //     esp_lcd_panel_ssd1306_config_t ssd1306_config = {
-    //         .height = static_cast<uint8_t>(DISPLAY_oled_HEIGHT),
-    //     };
-    //     panel_config.vendor_config = &ssd1306_config;
 
-    //     ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
-    //     ESP_LOGI(TAG, "SSD1306 driver installed");
-
-    //     // Reset the display
-    //     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
-    //     if (esp_lcd_panel_init(panel_) != ESP_OK) {
-    //         ESP_LOGE(TAG, "Failed to initialize display");
-    //         display_ = new NoDisplay();
-    //         return;
-    //     }
-
-    //     // Set the display to on
-    //     ESP_LOGI(TAG, "Turning display on");
-    //     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
-
-    //     // 添加这段代码，检查可用内存
-    //     //  ESP_LOGI(TAG, "Available heap before display init: %d", esp_get_free_heap_size());
-    
-    //     display_ = new OledDisplay(panel_io_, panel_, DISPLAY_oled_WIDTH, DISPLAY_oled_HEIGHT, DISPLAY_oled_MIRROR_X, DISPLAY_oled_MIRROR_Y,
-    //         {&font_puhui_14_1, &font_awesome_14_1});
-
-    
-    // // 检查初始化后的内存状态                          
-    // // ESP_LOGI(TAG, "Available heap after display init: %d", esp_get_free_heap_size());
-
-    // }
-// void InitializeSsdSh1107Display() {
-//         // SSD1306 config
-//         esp_lcd_panel_io_i2c_config_t io_config = {
-//             .dev_addr = 0x3C,
-//             .on_color_trans_done = nullptr,
-//             .user_ctx = nullptr,
-//             .control_phase_bytes = 1,
-//             .dc_bit_offset = 6,
-//             .lcd_cmd_bits = 8,
-//             .lcd_param_bits = 8,
-//             .flags = {
-//                 .dc_low_on_data = 0,
-//                 .disable_control_phase = 0,
-//             },
-//             .scl_speed_hz = 400 * 1000,
-//         };
-
-//         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(codec_i2c_bus_, &io_config, &panel_io_));
-
-//         ESP_LOGI(TAG, "Install SSD1306 driver");
-//         esp_lcd_panel_dev_config_t panel_config = {};
-//         panel_config.reset_gpio_num = -1;
-//         panel_config.bits_per_pixel = 1;
-
-//         esp_lcd_panel_ssd1306_config_t ssd1306_config = {
-//             .height = static_cast<uint8_t>(DISPLAY_oled_HEIGHT),
-//         };
-//         panel_config.vendor_config = &ssd1306_config;
-
-//         ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
-//         ESP_LOGI(TAG, "SSD1306 driver installed");
-
-//         // Reset the display
-//         ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
-//         if (esp_lcd_panel_init(panel_) != ESP_OK) {
-//             ESP_LOGE(TAG, "Failed to initialize display");
-//             display_ = new NoDisplay();
-//             return;
-//         }
-
-//         // Set the display to on
-//         ESP_LOGI(TAG, "Turning display on");
-//         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
-
-//         // 添加这段代码，检查可用内存
-//         //  ESP_LOGI(TAG, "Available heap before display init: %d", esp_get_free_heap_size());
-    
-//         display_ = new OledDisplay(panel_io_, panel_, DISPLAY_oled_WIDTH, DISPLAY_oled_HEIGHT, DISPLAY_oled_MIRROR_X, DISPLAY_oled_MIRROR_Y,
-//             {&font_puhui_14_1, &font_awesome_14_1});
-
-    
-//     // 检查初始化后的内存状态                          
-//     // ESP_LOGI(TAG, "Available heap after display init: %d", esp_get_free_heap_size());
-
-//     }
 public:
     Esp32c3ChenglongBoard() : boot_button_(BOOT_BUTTON_GPIO) {  
         // 把 ESP32C3 的 VDD SPI 引脚作为普通 GPIO 口使用
@@ -1005,28 +854,28 @@ public:
         InitializeIot();
         InitializeUart();  // 添加串口初始化
 
-        // InitializeSpi();//tft显示屏
-        // InitializeSt7789Display();
+        InitializeSpi();//tft显示屏
+        InitializeSt7789Display();
         // InitializeSsd1306Display();
 
        
         codec->SetOutputVolume(90);
-        // GetBacklight()->SetBrightness(100);
+        GetBacklight()->SetBrightness(100);
 
         // esp_wifi_set_max_tx_power(12); //当设备与路由器距离较近（<5米）时，可以降低功率节省电量。（默认 20dBm）。
         // esp_wifi_set_ps(WIFI_PS_MIN_MODEM); //ESP32-C3 提供 Modem-sleep 模式，在 Wi-Fi 空闲时降低功耗.适用场景：Wi-Fi 并非持续高流量传输时，如在语音数据交换的间隔期间省电。
     }
 
-    // void InitializeSpi() {
-    //     spi_bus_config_t buscfg = {};
-    //     buscfg.mosi_io_num = DISPLAY_SPI_MOSI_PIN;
-    //     buscfg.miso_io_num = GPIO_NUM_NC;
-    //     buscfg.sclk_io_num = DISPLAY_SPI_SCK_PIN;
-    //     buscfg.quadwp_io_num = GPIO_NUM_NC;
-    //     buscfg.quadhd_io_num = GPIO_NUM_NC;
-    //     buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
-    //     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
-    // }
+    void InitializeSpi() {
+        spi_bus_config_t buscfg = {};
+        buscfg.mosi_io_num = DISPLAY_SPI_MOSI_PIN;
+        buscfg.miso_io_num = GPIO_NUM_NC;
+        buscfg.sclk_io_num = DISPLAY_SPI_SCK_PIN;
+        buscfg.quadwp_io_num = GPIO_NUM_NC;
+        buscfg.quadhd_io_num = GPIO_NUM_NC;
+        buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
+        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    }
 
     virtual Led* GetLed() override {
         ESP_LOGI(TAG, "GetLed");
@@ -1040,9 +889,9 @@ public:
         }
         return led_strip_;
     }
-    // virtual Display* GetDisplay() override {
-    //     return display_;
-    // }
+    virtual Display* GetDisplay() override {
+        return display_;
+    }
 
     // virtual AudioCodec* GetAudioCodec() override {
     //     // static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
@@ -1124,10 +973,10 @@ public:
     // bool IsPressToTalkEnabled() {
     //     return press_to_talk_enabled_;
     // }
-    // virtual Backlight* GetBacklight() override {
-    //     static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-    //     return &backlight;
-    // }
+    virtual Backlight* GetBacklight() override {
+        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+        return &backlight;
+    }
 
 
 
