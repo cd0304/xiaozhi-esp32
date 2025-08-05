@@ -640,11 +640,7 @@ private:
                  packet[4] == 0x04 && packet[5] == 0x00 && 
                  packet[6] == 0x25 && packet[7] == 0xFB) {
             ESP_LOGI(TAG, "唤醒词学习完成，触发新对话");
-            // Application::GetInstance().PlaySound(Lang::Sounds::P3_EXCLAMATION);
-            // Application::GetInstance().ToggleChatState();
-            // vTaskDelay(2000);
-            //  ESP_LOGI(TAG, "唤醒词学习完成，WakeWordInvoke");
-            // Application::GetInstance().WakeWordInvoke("你好,刚给你改了新名字，说出你的新名字吧");
+        
              Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
              vTaskDelay(20);
              Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
@@ -701,30 +697,7 @@ private:
     void SendUart(const uint8_t* response, size_t length) {
         // ESP_LOGI(TAG, "准备发送UART信息");
         
-        // 保存LED状态 - 使用静态变量避免堆分配
-        // static ChenglongLed::LedState led_state;
-        // static bool has_led_state = false;
-        
-        // if (led_strip_) {
-        //     led_state = led_strip_->GetState();
-        //     has_led_state = true;
-            
-        //     // 禁用LED
-        //     led_strip_->Disable();
-        //      // 等待一小段时间确保彩灯信号完全停止
-        //     vTaskDelay(pdMS_TO_TICKS(50));
-        // } else {
-        //     has_led_state = false;
-        // }
-        
-        // 标记UART为活跃状态
-        // uart_active = true;
-        
-        // // 配置UART引脚
-        // uart_set_pin(UART_NUM_0, GPIO_NUM_21, GPIO_NUM_20, 
-        //              UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-        // vTaskDelay(pdMS_TO_TICKS(10));
-        // uart_flush(UART_NUM_0);
+      
         // 发送数据
         uint8_t buffer[length + 1];
         buffer[0] = length;
@@ -733,36 +706,8 @@ private:
         uart_write_bytes(UART_NUM_0, buffer, length + 1);
         uart_wait_tx_done(UART_NUM_0, pdMS_TO_TICKS(100));
         
-        // 标记UART为非活跃状态
-        // uart_active = false;
-        
-        // 使用静态任务函数
-        // static ChenglongLed* led_to_restore = led_strip_;
-        
-        // 创建任务使用普通的C函数
-        // xTaskCreate(
-        //     // 静态任务函数
-        //     [](void* arg) {
-        //         vTaskDelay(pdMS_TO_TICKS(500));
-                
-        //         if (!uart_active && led_to_restore && has_led_state) {
-        //             ESP_LOGI(TAG, "重新启用LED控制器");
-        //             led_to_restore->Enable();
-                    
-        //             if (led_to_restore->IsEnabled()) {
-        //                 ESP_LOGI(TAG, "恢复LED状态");
-        //                 led_to_restore->RestoreState(led_state);
-        //             }
-        //         }
-                
-        //         vTaskDelete(NULL);
-        //     },
-        //     "led_enable_task", 
-        //     4096,           // 栈大小
-        //     NULL,           // 参数
-        //     1,              // 优先级
-        //     NULL            // 任务句柄
-        // );
+       
+     
     }
 
     void InitializeButtons() {
@@ -893,27 +838,7 @@ public:
         return display_;
     }
 
-    // virtual AudioCodec* GetAudioCodec() override {
-    //     // static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-    //     //     AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-    //     //     AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
-    //     // return &audio_codec;
-
-    //     static Es8311AudioCodec* audio_codec = nullptr;
-    
-    //     if (audio_codec == nullptr) {
-    //         // 尝试初始化音频编解码器
-    //         audio_codec = new Es8311AudioCodec(codec_i2c_bus_, I2C_NUM_0, 
-    //             AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-    //             AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, 
-    //             AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-    //             AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
-                
-    //         ESP_LOGI(TAG, "音频编解码器初始化完成");
-    //     }
-        
-    //     return audio_codec;
-    // }
+   
     virtual AudioCodec* GetAudioCodec() override {
         static Es8311AudioCodec* audio_codec = nullptr;
         static int init_attempts = 0;
@@ -962,17 +887,7 @@ public:
         return audio_codec;
     }
 
-    // void SetPressToTalkEnabled(bool enabled) {
-    //     press_to_talk_enabled_ = enabled;
-
-    //     Settings settings("vendor", true);
-    //     settings.SetInt("press_to_talk", enabled ? 1 : 0);
-    //     ESP_LOGI(TAG, "Press to talk enabled: %d", enabled);
-    // }
-
-    // bool IsPressToTalkEnabled() {
-    //     return press_to_talk_enabled_;
-    // }
+   
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
