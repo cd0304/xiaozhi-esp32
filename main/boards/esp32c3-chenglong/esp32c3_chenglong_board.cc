@@ -15,32 +15,31 @@
 #include "freertos/task.h"
 #include <cmath>  // 使用sin函数
 
-// #include <esp_wifi.h>  // 添加这个头文件以使用 esp_wifi_set_ps 函数
-
-// #include <esp_sleep.h>  // 添加此头文件以使用 esp_deep_sleep_start 函数
 
 
 #include "display/oled_display.h"
 #include "settings.h"
 #include "assets/lang_config.h"
+#include "display/display.h"
 #include "display/lcd_display.h"
 #include <esp_lcd_panel_vendor.h>
 #include <cstring>  
 #define TAG "Esp32c3ChenglongBoard"
+
+
+#ifdef CONFIG_LCD_ENABLE
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
 // LV_FONT_DECLARE(font_puhui_14_1);
 // LV_FONT_DECLARE(font_awesome_14_1);
+#endif
 
 // #define ADC_BATTERY_EMPTY  3300  // 设备快没电时的 电池adc电量 值
 // #define ADC_BATTERY_FULL   3425  // 充满电时的 ADC 值
 // #define ADC_TYPEC_FULL     3450    // 插入typec的 ADC 值（播放时，不播放会到3470）
 
 
-// 添加一个标志来跟踪 UART 是否活跃
-// bool uart_active = false;
-// 添加一个标志来跟踪设备是否处于睡眠状态
-// bool device_sleeping = false;
+
 // 添加自定义LED类
 class ChenglongLed : public Led {
 private:
@@ -701,31 +700,7 @@ private:
     void SendUart(const uint8_t* response, size_t length) {
         // ESP_LOGI(TAG, "准备发送UART信息");
         
-        // 保存LED状态 - 使用静态变量避免堆分配
-        // static ChenglongLed::LedState led_state;
-        // static bool has_led_state = false;
-        
-        // if (led_strip_) {
-        //     led_state = led_strip_->GetState();
-        //     has_led_state = true;
-            
-        //     // 禁用LED
-        //     led_strip_->Disable();
-        //      // 等待一小段时间确保彩灯信号完全停止
-        //     vTaskDelay(pdMS_TO_TICKS(50));
-        // } else {
-        //     has_led_state = false;
-        // }
-        
-        // 标记UART为活跃状态
-        // uart_active = true;
-        
-        // // 配置UART引脚
-        // uart_set_pin(UART_NUM_0, GPIO_NUM_21, GPIO_NUM_20, 
-        //              UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-        // vTaskDelay(pdMS_TO_TICKS(10));
-        // uart_flush(UART_NUM_0);
-        // 发送数据
+
         uint8_t buffer[length + 1];
         buffer[0] = length;
         memcpy(buffer + 1, response, length);
@@ -733,36 +708,7 @@ private:
         uart_write_bytes(UART_NUM_0, buffer, length + 1);
         uart_wait_tx_done(UART_NUM_0, pdMS_TO_TICKS(100));
         
-        // 标记UART为非活跃状态
-        // uart_active = false;
-        
-        // 使用静态任务函数
-        // static ChenglongLed* led_to_restore = led_strip_;
-        
-        // 创建任务使用普通的C函数
-        // xTaskCreate(
-        //     // 静态任务函数
-        //     [](void* arg) {
-        //         vTaskDelay(pdMS_TO_TICKS(500));
-                
-        //         if (!uart_active && led_to_restore && has_led_state) {
-        //             ESP_LOGI(TAG, "重新启用LED控制器");
-        //             led_to_restore->Enable();
-                    
-        //             if (led_to_restore->IsEnabled()) {
-        //                 ESP_LOGI(TAG, "恢复LED状态");
-        //                 led_to_restore->RestoreState(led_state);
-        //             }
-        //         }
-                
-        //         vTaskDelete(NULL);
-        //     },
-        //     "led_enable_task", 
-        //     4096,           // 栈大小
-        //     NULL,           // 参数
-        //     1,              // 优先级
-        //     NULL            // 任务句柄
-        // );
+
     }
 
     void InitializeButtons() {
@@ -790,15 +736,15 @@ private:
     // 物联网初始化，添加对 AI 可见设备
     void InitializeIot() {
         Settings settings("vendor");
-        // press_to_talk_enabled_ = settings.GetInt("press_to_talk", 0) != 0;
-
+      
         auto& thing_manager = iot::ThingManager::GetInstance();
         thing_manager.AddThing(iot::CreateThing("Speaker"));
         // thing_manager.AddThing(iot::CreateThing("MyThing"));
 
 
     }
-
+    
+    #ifdef CONFIG_LCD_ENABLE
     void InitializeSt7789Display() {
         ESP_LOGD(TAG, "Install panel IO");
         esp_lcd_panel_io_spi_config_t io_config = {};
@@ -835,7 +781,7 @@ private:
 #endif
         });
     }
-
+    #endif
 
 
 
@@ -853,19 +799,22 @@ public:
 
         InitializeIot();
         InitializeUart();  // 添加串口初始化
-
+        #ifdef CONFIG_LCD_ENABLE
         InitializeSpi();//tft显示屏
         InitializeSt7789Display();
+        GetBacklight()->SetBrightness(100);
+        #endif
         // InitializeSsd1306Display();
 
        
         codec->SetOutputVolume(90);
-        GetBacklight()->SetBrightness(100);
+
 
         // esp_wifi_set_max_tx_power(12); //当设备与路由器距离较近（<5米）时，可以降低功率节省电量。（默认 20dBm）。
         // esp_wifi_set_ps(WIFI_PS_MIN_MODEM); //ESP32-C3 提供 Modem-sleep 模式，在 Wi-Fi 空闲时降低功耗.适用场景：Wi-Fi 并非持续高流量传输时，如在语音数据交换的间隔期间省电。
     }
 
+    #ifdef CONFIG_LCD_ENABLE
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
         buscfg.mosi_io_num = DISPLAY_SPI_MOSI_PIN;
@@ -876,6 +825,7 @@ public:
         buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
         ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
+    #endif
 
     virtual Led* GetLed() override {
         ESP_LOGI(TAG, "GetLed");
@@ -889,31 +839,15 @@ public:
         }
         return led_strip_;
     }
-    virtual Display* GetDisplay() override {
-        return display_;
-    }
-
-    // virtual AudioCodec* GetAudioCodec() override {
-    //     // static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-    //     //     AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-    //     //     AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
-    //     // return &audio_codec;
-
-    //     static Es8311AudioCodec* audio_codec = nullptr;
     
-    //     if (audio_codec == nullptr) {
-    //         // 尝试初始化音频编解码器
-    //         audio_codec = new Es8311AudioCodec(codec_i2c_bus_, I2C_NUM_0, 
-    //             AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-    //             AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, 
-    //             AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-    //             AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
-                
-    //         ESP_LOGI(TAG, "音频编解码器初始化完成");
-    //     }
-        
-    //     return audio_codec;
-    // }
+    virtual Display* GetDisplay() override {
+        #ifdef CONFIG_LCD_ENABLE
+        return display_;
+        #else
+        static NoDisplay no_display;
+        return &no_display;
+        #endif
+    }
     virtual AudioCodec* GetAudioCodec() override {
         static Es8311AudioCodec* audio_codec = nullptr;
         static int init_attempts = 0;
@@ -962,20 +896,16 @@ public:
         return audio_codec;
     }
 
-    // void SetPressToTalkEnabled(bool enabled) {
-    //     press_to_talk_enabled_ = enabled;
 
-    //     Settings settings("vendor", true);
-    //     settings.SetInt("press_to_talk", enabled ? 1 : 0);
-    //     ESP_LOGI(TAG, "Press to talk enabled: %d", enabled);
-    // }
-
-    // bool IsPressToTalkEnabled() {
-    //     return press_to_talk_enabled_;
-    // }
     virtual Backlight* GetBacklight() override {
+        #ifdef CONFIG_LCD_ENABLE
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
+        #else
+        // 当LCD未启用时，使用一个无效的GPIO引脚
+        static PwmBacklight no_backlight(GPIO_NUM_NC, false);
+        return &no_backlight;
+        #endif
     }
 
 

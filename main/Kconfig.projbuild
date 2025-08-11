@@ -5,7 +5,11 @@ config OTA_VERSION_URL
     default "https://api.tenclass.net/xiaozhi/ota/"
     help
         The application will access this URL to check for updates.
-
+config LCD_ENABLE
+    bool "是否启用显示屏"
+    default n
+    help
+        需要 ESP32 S3 与 AFE 支持
 
 choice
     prompt "语言选择"
@@ -245,6 +249,8 @@ config USE_AUDIO_PROCESSOR
     depends on IDF_TARGET_ESP32S3 && SPIRAM
     help
         需要 ESP32 S3 与 AFE 支持
+
+
 
 config USE_REALTIME_CHAT
     bool "启用可语音打断的实时对话模式（需要 AEC 支持）"
